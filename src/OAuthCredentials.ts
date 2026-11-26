@@ -1,3 +1,4 @@
+import { BridgeError } from './BridgeError.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
@@ -23,7 +24,7 @@ export class OAuthCredentials
 
     if (!response.ok)
     {
-      throw new Error('Agent Address OAuth request failed: HTTP ' + response.status);
+      throw new BridgeError('Agent Address OAuth request failed: HTTP ' + response.status);
     }
 
     return await response.json() as T;
@@ -33,7 +34,7 @@ export class OAuthCredentials
   {
     if (typeof tokens.access_token !== 'string' || !tokens.access_token)
     {
-      throw new Error('OAuth response lacks an access token.');
+      throw new BridgeError('OAuth response lacks an access token.');
     }
 
     const credentials: SavedCredentials = {
@@ -69,7 +70,7 @@ export class OAuthCredentials
       if (!authorizationCode || url.searchParams.has('error'))
       {
         response.writeHead(400).end('Authorization did not complete.');
-        fail(new Error('OAuth authorization did not complete.'));
+        fail(new BridgeError('OAuth authorization did not complete.'));
         return;
       }
 
@@ -78,7 +79,7 @@ export class OAuthCredentials
       complete(authorizationCode);
     });
     server.once('error', error => fail(error));
-    const timer = setTimeout(() => fail(new Error('OAuth authorization timed out.')), 180_000);
+    const timer = setTimeout(() => fail(new BridgeError('OAuth authorization timed out.')), 180_000);
 
     try
     {
@@ -108,7 +109,7 @@ export class OAuthCredentials
 
     if (!registration.client_id)
     {
-      throw new Error('OAuth registration did not return a client identifier.');
+      throw new BridgeError('OAuth registration did not return a client identifier.');
     }
 
     const authorizeURL = new URL('/authorize', OAuthCredentials.origin);
@@ -131,7 +132,7 @@ export class OAuthCredentials
 
     if (saved.origin !== OAuthCredentials.origin || !saved.access_token || !saved.client_id)
     {
-      throw new Error('Invalid saved Nuwa authorization.');
+      throw new BridgeError('Invalid saved Nuwa authorization.');
     }
 
     if (saved.expires_at === null || saved.expires_at > Date.now() + 60_000)
@@ -141,7 +142,7 @@ export class OAuthCredentials
 
     if (!saved.refresh_token)
     {
-      throw new Error('Nuwa authorization expired; administrator recovery is required.');
+      throw new BridgeError('Nuwa authorization expired; administrator recovery is required.');
     }
 
     const tokens = await this.request<Tokens>('/token', new URLSearchParams({

@@ -1,3 +1,4 @@
+import { BridgeError } from './BridgeError.js';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, closeSync, mkdirSync, openSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -10,6 +11,7 @@ import type { BridgeBinding } from './Contracts.js';
 import { DeliveryStore } from './DeliveryStore.js';
 import { LineBackend } from './LineBackend.js';
 import { LineStorage } from './LineStorage.js';
+import { Logger } from './Logger.js';
 import { OAuthCredentials } from './OAuthCredentials.js';
 import { PrivateJSON } from './PrivateJSON.js';
 import { RemoteRelayClient } from './RemoteRelayClient.js';
@@ -21,6 +23,7 @@ type Config = {
 
 class Application
 {
+  private static readonly logger = new Logger('bridge');
   private readonly directory = resolve(process.env.NUWA_BRIDGE_HOME ?? join(homedir(), '.config', 'nuwa-agent-relay-bridge'));
   private readonly config = new PrivateJSON(join(this.directory, 'config.json'));
   private readonly oauthFile = new PrivateJSON(join(this.directory, 'oauth.json'));
@@ -32,7 +35,7 @@ class Application
   {
     if (process.platform !== 'linux')
     {
-      throw new Error('This pilot targets a Linux host.');
+      throw new BridgeError('This pilot targets a Linux host.');
     }
 
     process.umask(0o077);
@@ -44,7 +47,7 @@ class Application
   {
     if (this.config.exists)
     {
-      throw new Error('Bridge is already configured; preserve its registered identity.');
+      throw new BridgeError('Bridge is already configured; preserve its registered identity.');
     }
 
     if (!this.oauthFile.exists)
@@ -63,7 +66,7 @@ class Application
 
       if (identity.sessionID === recipient.id || identity.canonical.split('/')[0] !== address.split('/')[0])
       {
-        throw new Error('Select a different assistant in the same organization.');
+        throw new BridgeError('Select a different assistant in the same organization.');
       }
 
       const line = await LineBackend.connect(this.storage, true);
@@ -78,7 +81,7 @@ class Application
 
         if (approval.trim() !== 'yes')
         {
-          throw new Error('Employee pairing was not approved.');
+          throw new BridgeError('Employee pairing was not approved.');
         }
 
         this.config.write({
@@ -105,7 +108,7 @@ class Application
 
     if (values.some(value => typeof value !== 'string' || !value))
     {
-      throw new Error('Incomplete bridge configuration.');
+      throw new BridgeError('Incomplete bridge configuration.');
     }
 
     return {
@@ -123,7 +126,7 @@ class Application
 
     if (recipient.id !== binding.recipientSessionID)
     {
-      throw new Error('Designated assistant identity changed.');
+      throw new BridgeError('Designated assistant identity changed.');
     }
 
     const line = await LineBackend.connect(this.storage, false);
@@ -132,7 +135,7 @@ class Application
     {
       if (line.accountID !== binding.accountID)
       {
-        throw new Error('LINE account differs from its configured identity.');
+        throw new BridgeError('LINE account differs from its configured identity.');
       }
 
       const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), binding);
@@ -146,20 +149,22 @@ class Application
       {
         line.listen(message => { bridge.receive(message); }, error =>
         {
-          console.error('Native receive failed:', error instanceof Error ? error.name : 'UnknownError');
+          Application.logger.failure('native_receive_failed', error);
           stop();
         });
         console.log('Bridge running:', config.canonical);
 
         while (!stopped)
         {
+          line.assertHealthy();
+
           try
           {
             await bridge.cycle();
           }
           catch (error)
           {
-            console.error('Bridge cycle failed:', error instanceof Error ? error.name : 'UnknownError');
+            Application.logger.failure('cycle_failed', error);
           }
 
           await delay(2000);
@@ -188,6 +193,8 @@ class Application
     {
       console.log('Bridge address:', config.canonical);
       console.log('Designated assistant:', config.recipient_address);
+      console.log('Pending inbound submissions:', store.pendingCount);
+      console.log('Blocked inbound messages:', store.blocked);
       console.log('Uncertain native deliveries:', store.unresolved);
     }
     finally
@@ -208,7 +215,7 @@ class Application
 
     if (command !== 'setup' && command !== 'start')
     {
-      throw new Error('Use setup, start, or status.');
+      throw new BridgeError('Use setup, start, or status.');
     }
 
     const lockPath = join(this.directory, 'bridge.lock');
@@ -235,7 +242,6 @@ class Application
 
 new Application().run(process.argv[2]).catch(error =>
 {
-  // Error messages are deliberately omitted here because upstream libraries may include credentials.
-  console.error('Bridge operation failed:', error instanceof Error ? error.name : 'UnknownError');
+  new Logger('cli').failure('operation_failed', error);
   process.exitCode = 1;
 });

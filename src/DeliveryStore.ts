@@ -1,3 +1,4 @@
+import { BridgeError } from './BridgeError.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -54,7 +55,7 @@ export class DeliveryStore
     if (row?.value !== value)
     {
       this.database.close();
-      throw new Error('Stored bridge identity or access binding differs from configuration.');
+      throw new BridgeError('Stored bridge identity or access binding differs from configuration.');
     }
   }
 
@@ -121,7 +122,7 @@ export class DeliveryStore
 
       if (route !== message.conversationID)
       {
-        throw new Error('Relay thread belongs to a different native conversation.');
+        throw new BridgeError('Relay thread belongs to a different native conversation.');
       }
 
       this.database.prepare('INSERT INTO native_links VALUES (?, ?, ?, NULL)')
@@ -170,6 +171,20 @@ export class DeliveryStore
   {
     const row = this.database.prepare('SELECT COUNT(*) AS total FROM outbound WHERE state = ?')
       .get(DeliveryState.Uncertain);
+    return Number(row?.total);
+  }
+
+  get blocked(): number
+  {
+    const row = this.database.prepare('SELECT COUNT(*) AS total FROM inbound WHERE state = ?')
+      .get(DeliveryState.Blocked);
+    return Number(row?.total);
+  }
+
+  get pendingCount(): number
+  {
+    const row = this.database.prepare('SELECT COUNT(*) AS total FROM inbound WHERE state = ?')
+      .get(DeliveryState.Pending);
     return Number(row?.total);
   }
 

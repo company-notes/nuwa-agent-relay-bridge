@@ -1,15 +1,18 @@
+import { BridgeError } from './BridgeError.js';
 import { Client, type TalkMessage } from '@evex-dev/linejs';
 import { BaseClient } from '@evex-dev/linejs/base';
 
 import type { MessagingBackend, NativeMessage } from './Contracts.js';
 import { LineStorage } from './LineStorage.js';
+import { Logger } from './Logger.js';
 
 export class LineBackend implements MessagingBackend
 {
   private static readonly tokenKey = 'nuwa_bridge_auth_token';
+  private static readonly logger = new Logger('line');
   private readonly controller = new AbortController();
 
-  private constructor(private readonly client: Client, readonly accountID: string) {}
+  private constructor(private readonly client: Client, readonly accountID: string, private readonly checkSession: () => void) {}
 
   static async connect(storage: LineStorage, interactive: boolean): Promise<LineBackend>
   {
@@ -22,7 +25,7 @@ export class LineBackend implements MessagingBackend
       pendingSave = pendingSave.then(() => storage.set(LineBackend.tokenKey, token)).catch(error =>
       {
         failure = error;
-        console.error('LINE session storage failed; administrator recovery is required.');
+        LineBackend.logger.failure('session_storage_failed', error);
       });
     });
 
@@ -36,7 +39,7 @@ export class LineBackend implements MessagingBackend
     {
       if (!interactive)
       {
-        throw new Error('LINE authorization is required. Run setup.');
+        throw new BridgeError('LINE authorization is required. Run setup.');
       }
 
       base.on('qrcall', url => console.log('Open the LINE login URL on your authorized device:', url));
@@ -48,11 +51,21 @@ export class LineBackend implements MessagingBackend
 
     if (failure || !base.profile?.mid)
     {
-      throw new Error('LINE account initialization failed.');
+      throw new BridgeError('LINE account initialization failed.');
     }
 
-    const backend = new LineBackend(new Client(base), base.profile.mid);
-    return backend;
+    return new LineBackend(new Client(base), base.profile.mid, () =>
+    {
+      if (failure)
+      {
+        throw new BridgeError('LINE session storage failed; administrator recovery is required.');
+      }
+    });
+  }
+
+  assertHealthy(): void
+  {
+    this.checkSession();
   }
 
   private normalize(message: TalkMessage): NativeMessage | undefined
@@ -77,7 +90,7 @@ export class LineBackend implements MessagingBackend
       const timer = setTimeout(() =>
       {
         this.stop();
-        reject(new Error('Employee pairing timed out.'));
+        reject(new BridgeError('Employee pairing timed out.'));
       }, 180_000);
       this.listen(message =>
       {
@@ -121,6 +134,7 @@ export class LineBackend implements MessagingBackend
 
   async send(conversationID: string, body: string): Promise<string>
   {
+    this.assertHealthy();
     const message = await this.client.base.talk.sendMessage({ to: conversationID, text: body, e2ee: true });
     return message.id;
   }

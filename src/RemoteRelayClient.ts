@@ -1,3 +1,4 @@
+import { BridgeError } from './BridgeError.js';
 import { randomUUID } from 'node:crypto';
 
 import type { RelayClient, RelayMessage, RelaySubmission } from './Contracts.js';
@@ -29,7 +30,7 @@ export class RemoteRelayClient implements RelayClient
 
     if (!response.ok)
     {
-      throw new Error('Nuwa request failed: ' + name + ' HTTP ' + response.status);
+      throw new BridgeError('Nuwa request failed: ' + name + ' HTTP ' + response.status);
     }
 
     const rpc = await response.json() as RPCResponse;
@@ -38,7 +39,7 @@ export class RemoteRelayClient implements RelayClient
     if (rpc.id !== id || rpc.result?.isError || content?.length !== 1 ||
         content[0]?.type !== 'text' || typeof content[0].text !== 'string')
     {
-      throw new Error('Nuwa tool operation failed: ' + name);
+      throw new BridgeError('Nuwa tool operation failed: ' + name);
     }
 
     return JSON.parse(content[0].text) as T;
@@ -50,7 +51,7 @@ export class RemoteRelayClient implements RelayClient
 
     if (!identity.bound || !identity.sessionID || !identity.canonical)
     {
-      throw new Error('Nuwa did not establish the bridge identity.');
+      throw new BridgeError('Nuwa did not establish the bridge identity.');
     }
 
     return identity;
@@ -62,7 +63,7 @@ export class RemoteRelayClient implements RelayClient
 
     if (!status.session?.bound || status.session.sessionID !== sessionID || status.session.canonical !== canonical)
     {
-      throw new Error('Nuwa identity differs from the configured bridge identity.');
+      throw new BridgeError('Nuwa identity differs from the configured bridge identity.');
     }
   }
 
@@ -72,7 +73,7 @@ export class RemoteRelayClient implements RelayClient
 
     if (!session.id || session.canonical !== address)
     {
-      throw new Error('Select a verified full Nuwa session address.');
+      throw new BridgeError('Select a verified full Nuwa session address.');
     }
 
     return session;
@@ -96,7 +97,7 @@ export class RemoteRelayClient implements RelayClient
         typeof message.body !== 'string' || !Array.isArray(message.artifactLinks) ||
         message.artifactLinks.some(link => typeof link !== 'string')))
     {
-      throw new Error('Invalid Nuwa inbox response.');
+      throw new BridgeError('Invalid Nuwa inbox response.');
     }
 
     return messages;

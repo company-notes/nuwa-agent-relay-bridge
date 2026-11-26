@@ -1,3 +1,4 @@
+import { BridgeError } from './BridgeError.js';
 import type { BridgeBinding, MessagingBackend, NativeMessage, RelayClient, RelayMessage } from './Contracts.js';
 import { DeliveryStore } from './DeliveryStore.js';
 
@@ -23,7 +24,7 @@ export class Bridge
 
     if (!message.messageID || !message.body.trim() || message.body.length > 100_000)
     {
-      throw new Error('Invalid native text message.');
+      throw new BridgeError('Invalid native text message.');
     }
 
     this.store.accept(message);
@@ -50,7 +51,7 @@ export class Bridge
 
       if (!result.messageId || !result.threadId || (quote && result.threadId !== quote.threadID))
       {
-        throw new Error('Invalid Relay submission correlation.');
+        throw new BridgeError('Invalid Relay submission correlation.');
       }
 
       this.store.recordSubmission(message, result);
@@ -78,7 +79,7 @@ export class Bridge
 
     if (!nativeID)
     {
-      throw new Error('Native delivery returned no message identifier.');
+      throw new BridgeError('Native delivery returned no message identifier.');
     }
 
     this.store.recordDelivery(message, conversationID, nativeID);
@@ -91,7 +92,7 @@ export class Bridge
 
     if (page.length >= 100 && (!previous || !page.some(message => message.id === previous)))
     {
-      throw new Error('Relay inbox window is saturated without a known checkpoint.');
+      throw new BridgeError('Relay inbox window is saturated without a known checkpoint.');
     }
 
     for (const message of [...page].reverse())
@@ -109,7 +110,7 @@ export class Bridge
   {
     if (this.busy)
     {
-      throw new Error('A bridge cycle is already running.');
+      throw new BridgeError('A bridge cycle is already running.');
     }
 
     this.busy = true;
