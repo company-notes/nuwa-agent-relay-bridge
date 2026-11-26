@@ -13,4 +13,4 @@ Follow [CODE_PRINCIPLES.md](CODE_PRINCIPLES.md) in production and test code. Tes
 
 Run `npm install`, `npm run check`, and `npm test`. CI executes the same checks. For regressions, demonstrate a meaningful failing assertion before repair, run the same test after repair, then run the related and full suites. Perform the Rule 20 spacing review after logic passes and rerun validation.
 
-The core tests use controlled external services; they do not establish live LINE login, Nuwa OAuth, or AI platform delivery. Verify those boundaries through a real two-way conversation before releasing an installation package.
+The core tests use controlled external services; they do not establish live LINE login, Nuwa OAuth, or AI platform delivery. Verify those boundaries through a real two-way conversation before production deployment. A clearly labeled pilot release enables real-account acceptance. CI builds and launches the standalone executable from a separate working directory without a Node.js installation on PATH, checks its version/help output, and verifies that an unconfigured status command fails safely.

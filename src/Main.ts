@@ -1,6 +1,6 @@
 import { BridgeError } from './BridgeError.js';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, closeSync, mkdirSync, openSync, unlinkSync } from 'node:fs';
+import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -88,7 +88,7 @@ class Application
           session_id: identity.sessionID, canonical: identity.canonical, account_id: line.accountID,
           employee_id: employeeID, recipient_session_id: recipient.id, recipient_address: recipient.canonical,
         } satisfies Config);
-        console.log('Bridge setup complete. Run npm start.');
+        console.log('Bridge setup complete. Run nuwa-bridge start.');
       }
       finally
       {
@@ -207,6 +207,19 @@ class Application
 
   async run(command: string | undefined): Promise<void>
   {
+    if (command === '--version')
+    {
+      const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+      console.log('Nuwa Agent Relay Bridge ' + manifest.version);
+      return;
+    }
+
+    if (!command || command === '--help' || command === 'help')
+    {
+      console.log('Usage: nuwa-bridge <setup | start | status | --version>');
+      return;
+    }
+
     this.initialize();
 
     if (command === 'status')

@@ -1,0 +1,56 @@
+name: Build standalone pilot
+
+on:
+  push:
+    branches: [main, feat/bridge-core]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.0'
+      - run: npm install --ignore-scripts
+      - run: npm run check
+      - run: npm test
+      - run: npm prune --omit=dev --ignore-scripts
+      - run: bash scripts/PackageLinux.sh
+      - run: bash scripts/SmokeLinux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuwa-bridge-linux-x64
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: linux-x64
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nuwa-bridge-linux-x64
+          path: release
+      - name: Publish pilot executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          tag=v0.1.0
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; versioned artifacts are immutable."
+            exit 1
+          fi
+          gh release create "$tag" release/nuwa-bridge-linux-x64.run release/SHA256SUMS \
+            --target "$RELEASE_SHA" --prerelease --title "Nuwa Agent Relay Bridge 0.1.0 (Linux pilot)" \
+            --notes "Standalone Linux x64 executable with bundled Node.js and dependencies. For controlled LINE/Nuwa acceptance testing; one approved employee. See docs/Pilot.md. Live account and cross-platform acceptance are pending."
