@@ -1,0 +1,46 @@
+export interface NativeMessage
+{
+  messageID: string;
+  conversationID: string;
+  senderID: string;
+  body: string;
+  replyToID?: string;
+}
+
+export interface BridgeBinding
+{
+  sessionID: string;
+  accountID: string;
+  employeeID: string;
+  recipientSessionID: string;
+  recipientAddress: string;
+}
+
+export interface RelayMessage
+{
+  id: string;
+  threadId: string;
+  kind: string;
+  senderSessionID: string;
+  recipientSessionID: string;
+  body: string;
+  artifactLinks: string[];
+}
+
+export interface RelaySubmission
+{
+  messageId: string;
+  threadId: string;
+}
+
+export interface RelayClient
+{
+  send(to: string, body: string, submissionID: string): Promise<RelaySubmission>;
+  reply(threadID: string, body: string, submissionID: string, messageID?: string): Promise<RelaySubmission>;
+  inbox(): Promise<RelayMessage[]>;
+}
+
+export interface MessagingBackend
+{
+  send(conversationID: string, body: string): Promise<string>;
+}
