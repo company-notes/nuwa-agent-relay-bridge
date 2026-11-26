@@ -1,0 +1,24 @@
+{
+  "name": "nuwa-agent-relay-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.11.0 <25"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "setup": "node dist/src/Main.js setup",
+    "start": "node dist/src/Main.js start",
+    "status": "node dist/src/Main.js status"
+  },
+  "dependencies": {
+    "@evex-dev/linejs": "3.6.9"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "typescript": "5.9.3"
+  }
+}
