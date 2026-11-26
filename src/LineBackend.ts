@@ -135,7 +135,9 @@ export class LineBackend implements MessagingBackend
   async send(conversationID: string, body: string): Promise<string>
   {
     this.assertHealthy();
+
     const message = await this.client.base.talk.sendMessage({ to: conversationID, text: body, e2ee: true });
+
     return message.id;
   }
 

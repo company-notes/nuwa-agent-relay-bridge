@@ -118,6 +118,7 @@ export class DeliveryStore
     {
       this.database.prepare('INSERT OR IGNORE INTO thread_routes VALUES (?, ?)')
         .run(result.threadId, message.conversationID);
+
       const route = this.findThread(result.threadId);
 
       if (route !== message.conversationID)
@@ -135,6 +136,7 @@ export class DeliveryStore
   findThread(threadID: string): string | undefined
   {
     const row = this.database.prepare('SELECT conversation_id FROM thread_routes WHERE thread_id = ?').get(threadID);
+
     return typeof row?.conversation_id === 'string' ? row.conversation_id : undefined;
   }
 

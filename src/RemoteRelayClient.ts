@@ -19,6 +19,7 @@ export class RemoteRelayClient implements RelayClient
   {
     const id = randomUUID();
     const token = await this.credentials.accessToken();
+
     const response = await fetch(this.endpoint, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(45_000),
       headers: {

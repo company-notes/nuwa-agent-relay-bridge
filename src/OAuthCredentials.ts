@@ -118,6 +118,7 @@ export class OAuthCredentials
       state, code_challenge: challenge, code_challenge_method: 'S256',
     }).toString();
     const code = await this.receiveCode(state, authorizeURL);
+
     const tokens = await this.request<Tokens>('/token', new URLSearchParams({
       grant_type: 'authorization_code', client_id: registration.client_id,
       redirect_uri: OAuthCredentials.redirectURI, code, code_verifier: verifier,

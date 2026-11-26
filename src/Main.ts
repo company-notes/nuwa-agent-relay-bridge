@@ -121,6 +121,7 @@ class Application
   {
     const config = this.config.read<Config>();
     const binding = this.binding(config);
+
     await this.relay.verifyIdentity(binding.sessionID, config.canonical);
     const recipient = await this.relay.resolve(binding.recipientAddress);
 
@@ -140,6 +141,7 @@ class Application
 
       const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), binding);
       const bridge = new Bridge(binding, store, this.relay, line);
+
       let stopped = false;
       const stop = () => { stopped = true; line.stop(); };
       process.once('SIGINT', stop);

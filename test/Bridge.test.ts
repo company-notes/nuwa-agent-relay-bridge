@@ -150,6 +150,7 @@ test('lost Relay response and repeated native event preserve one submission acro
 
   s.request('request-1', 'Prepare report');
   s.relay.failAfterAccept = true;
+
   await assert.rejects(s.bridge.cycle(), /lost response/);
   const id = s.relay.submissions[0]!.id;
   s.restart();
@@ -173,6 +174,7 @@ test('uncertain native send is preserved for reconciliation rather than sent twi
   await s.bridge.cycle();
   s.answer(s.relay.submissions[0]!.thread);
   s.messaging.failAfterSend = true;
+
   await assert.rejects(s.bridge.cycle(), /uncertain native delivery/);
 
   s.restart();
