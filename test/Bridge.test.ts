@@ -375,6 +375,7 @@ test('company group members mention the assistant and quote its reply without mi
     approved_groups: [{ id: 'company', member_ids: members }, { id: 'project', member_ids: members }],
   });
   t.after(() => s.close());
+
   s.messaging.groups.set('company', members);
   s.messaging.groups.set('project', members);
   s.messaging.groups.set('external', members);
@@ -427,6 +428,7 @@ test('group access remains disabled until configured and changed membership bloc
     mode: GroupMode.Allowlist, approved_groups: [{ id: 'company', member_ids: members }],
   });
   t.after(() => s.close());
+
   s.messaging.groups.set('company', members);
   s.groupRequest('outsider', 'company', 'outsider', '@AI hello', true);
   s.groupRequest('approved', 'company', 'employee', '@AI report', true);
@@ -450,6 +452,7 @@ test('explicitly open groups still require current membership and a direct menti
 {
   const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
   t.after(() => s.close());
+
   s.messaging.groups.set('joined', ['company-line', 'employee']);
   s.messaging.groups.set('left', ['employee']);
 
@@ -469,9 +472,11 @@ test('a changed group audience starts a separate conversation and cannot receive
 {
   const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
   t.after(() => s.close());
+
   s.messaging.groups.set('company', ['company-line', 'employee']);
   s.groupRequest('old', 'company', 'employee', '@AI prepare report', true);
   await s.bridge.cycle();
+
   const oldThread = s.relay.submissions[0]!.thread;
 
   s.messaging.groups.set('company', ['company-line', 'employee', 'new-member']);

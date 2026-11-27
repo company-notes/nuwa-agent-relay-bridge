@@ -42,6 +42,7 @@ test('a real group mention retains its group destination instead of becoming a p
     raw: { id: 'group-message', contentType: 'NONE' }, text: '@Company hello',
     getReplyTarget: () => null, getMentions: () => [{ all: false, mid: 'u-company' }],
   } as unknown as TalkMessage;
+
   const message = LineMessage.normalize(event, 'u-company');
 
   assert.equal(message?.conversationID, 'group:c-company');

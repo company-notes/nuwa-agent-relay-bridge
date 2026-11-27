@@ -33,6 +33,7 @@ export class Bridge
     }
 
     const groupID = ConversationAddress.groupID(message.conversationID);
+
     if (groupID !== undefined)
     {
       if (!this.groupPolicy.accepts(groupID))

@@ -31,6 +31,7 @@ test('the administrator sees joined groups only and invited accounts cannot send
   const directory = new LineGroupDirectory(line.base);
 
   assert.deepEqual(await directory.list(), [{ id: 'company', name: 'Company', memberIDs: ['bot', 'employee'] }]);
+
   assert.deepEqual(await directory.members('company'), ['bot', 'employee']);
   assert.equal(await directory.members('invited'), undefined);
   assert.equal(await directory.members('missing'), undefined);

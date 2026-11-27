@@ -60,6 +60,7 @@ export class GroupPolicy
     }
 
     const members = await this.backend.groupMembers(groupID);
+
     if (!members || !members.includes(this.accountID) || (senderID && !members.includes(senderID)))
     {
       return undefined;

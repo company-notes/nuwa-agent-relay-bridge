@@ -24,6 +24,7 @@ export class LineGroupDirectory
     }
 
     const memberIDs = Object.keys(members);
+
     if (!this.base.profile?.mid || !memberIDs.includes(this.base.profile.mid))
     {
       return undefined;
@@ -56,6 +57,7 @@ export class LineGroupDirectory
     }
 
     const groups: LINEGroup[] = [];
+
     for (let offset = 0; offset < ids.length; offset += 50)
     {
       const result = await this.base.talk.getChats({
@@ -70,6 +72,7 @@ export class LineGroupDirectory
       for (const chat of result.chats)
       {
         const group = this.parse(chat);
+
         if (group && ids.includes(group.id))
         {
           groups.push(group);
