@@ -34,3 +34,15 @@ test('private media is represented explicitly and untrusted sticker URLs are exc
   assert.match(photo?.body ?? '', /image received; attachment data is not available/);
   assert.deepEqual(sticker?.artifactLinks, []);
 });
+
+test('a real group mention retains its group destination instead of becoming a private message', () =>
+{
+  const event = {
+    isMyMessage: false, from: { id: 'u-employee' }, to: { type: 'GROUP', id: 'c-company' },
+    raw: { id: 'group-message', contentType: 'NONE' }, text: '@Company hello',
+    getReplyTarget: () => null, getMentions: () => [{ all: false, mid: 'u-company' }],
+  } as unknown as TalkMessage;
+  const message = LineMessage.normalize(event, 'u-company');
+
+  assert.equal(message?.conversationID, 'group:c-company');
+});
