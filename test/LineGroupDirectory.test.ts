@@ -80,8 +80,10 @@ test('group roster reads request the complete member and invitee response and re
   const directory = new LineGroupDirectory(base);
 
   assert.deepEqual(await directory.members('c-company'), ['bot', 'employee']);
+
   chat.type = 'PEER';
   assert.equal(await directory.members('c-company'), undefined);
+
   chat.type = 'GROUP';
   chat.extra.groupExtra.memberMids.delete('bot');
   assert.equal(await directory.members('c-company'), undefined);

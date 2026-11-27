@@ -43,6 +43,7 @@ export class LineGroupDirectory
     }
 
     const keys = members instanceof Map ? [...members.keys()] : Object.keys(members);
+
     if (keys.some(id => typeof id !== 'string' || !id))
     {
       this.logger.info('/group/roster/rejected', { reason: 'invalid_member_ids' });
