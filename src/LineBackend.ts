@@ -34,37 +34,28 @@ export class LineBackend implements MessagingBackend
 
     const prompt = new LineLoginPrompt();
 
-    if (typeof saved === 'string' && saved)
+    if (!(typeof saved === 'string' && saved) && !interactive)
     {
-      prompt.resume();
+      throw new BridgeError('LINE authorization is required. Run setup.');
+    }
 
-      try
+    try
+    {
+      if (typeof saved === 'string' && saved)
       {
+        prompt.resume();
         await base.loginProcess.login({ authToken: saved });
       }
-      catch (error)
+      else
       {
-        throw prompt.failure(error);
-      }
-    }
-    else
-    {
-      if (!interactive)
-      {
-        throw new BridgeError('LINE authorization is required. Run setup.');
-      }
-
-      base.on('qrcall', url => prompt.qr(url));
-      base.on('pincall', pin => prompt.pin(pin));
-
-      try
-      {
+        base.on('qrcall', url => prompt.qr(url));
+        base.on('pincall', pin => prompt.pin(pin));
         await base.loginProcess.login({ qr: true });
       }
-      catch (error)
-      {
-        throw prompt.failure(error);
-      }
+    }
+    catch (error)
+    {
+      throw prompt.failure(error);
     }
 
     await pendingSave;
