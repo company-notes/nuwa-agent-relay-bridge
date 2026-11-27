@@ -31,6 +31,7 @@ trap stop INT TERM HUP
 payloadLine=$(awk '/^__NUWA_PAYLOAD__$/ {print NR+1; exit}' "$0")
 tail -n +"$payloadLine" "$0" | tar -xzf - -C "$workDir"
 
+export NUWA_BRIDGE_EXECUTABLE="$0"
 exec 3<&0
 "$workDir/node" "$workDir/dist/src/Main.js" "$@" <&3 3<&- &
 child=$!

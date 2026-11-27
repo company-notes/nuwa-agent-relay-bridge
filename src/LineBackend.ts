@@ -1,9 +1,11 @@
 import { BridgeError } from './BridgeError.js';
-import { Client, type TalkMessage } from '@evex-dev/linejs';
+import { Client } from '@evex-dev/linejs';
 import { BaseClient } from '@evex-dev/linejs/base';
 
 import type { MessagingBackend, NativeMessage } from './Contracts.js';
 import { LineStorage } from './LineStorage.js';
+import { LineContactDirectory, type LINEFriend } from './LineContactDirectory.js';
+import { LineMessage } from './LineMessage.js';
 import { LineLoginPrompt } from './LineLoginPrompt.js';
 import { Logger } from './Logger.js';
 
@@ -13,7 +15,12 @@ export class LineBackend implements MessagingBackend
   private static readonly logger = new Logger('line');
   private readonly controller = new AbortController();
 
-  private constructor(private readonly client: Client, readonly accountID: string, private readonly checkSession: () => void) {}
+  private readonly contacts: LineContactDirectory;
+
+  private constructor(private readonly client: Client, readonly accountID: string, private readonly checkSession: () => void)
+  {
+    this.contacts = new LineContactDirectory(client.base);
+  }
 
   static async connect(storage: LineStorage, interactive: boolean): Promise<LineBackend>
   {
@@ -79,47 +86,16 @@ export class LineBackend implements MessagingBackend
     this.checkSession();
   }
 
-  private normalize(message: TalkMessage): NativeMessage | undefined
+  async listFriends(): Promise<LINEFriend[]>
   {
-    if (message.isMyMessage || message.to.type !== 'USER' || message.to.id !== this.accountID ||
-        typeof message.text !== 'string' || !message.text.trim())
-    {
-      return undefined;
-    }
-
-    const senderID = message.from.id;
-    return {
-      messageID: message.raw.id, senderID, conversationID: senderID, body: message.text,
-      replyToID: message.getReplyTarget()?.id,
-    };
+    this.assertHealthy();
+    return this.contacts.list();
   }
 
-  async pairEmployee(challenge: string): Promise<string>
+  async isFriend(senderID: string): Promise<boolean>
   {
-    return await new Promise<string>((resolve, reject) =>
-    {
-      const timer = setTimeout(() =>
-      {
-        this.stop();
-        reject(new BridgeError('Employee pairing timed out.'));
-      }, 180_000);
-      this.listen(message =>
-      {
-        if (message.body.trim() !== challenge)
-        {
-          return;
-        }
-
-        clearTimeout(timer);
-        this.stop();
-        resolve(message.senderID);
-      }, error =>
-      {
-        clearTimeout(timer);
-        this.stop();
-        reject(error);
-      });
-    });
+    this.assertHealthy();
+    return this.contacts.isFriend(senderID);
   }
 
   listen(receive: (message: NativeMessage) => void, onError: (error: unknown) => void): void
@@ -128,7 +104,7 @@ export class LineBackend implements MessagingBackend
     {
       try
       {
-        const native = this.normalize(message);
+        const native = LineMessage.normalize(message, this.accountID);
 
         if (native)
         {

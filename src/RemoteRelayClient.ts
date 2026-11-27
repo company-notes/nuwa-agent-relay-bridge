@@ -80,14 +80,18 @@ export class RemoteRelayClient implements RelayClient
     return session;
   }
 
-  send(to: string, body: string, submissionID: string): Promise<RelaySubmission>
+  send(to: string, body: string, submissionID: string, artifactLinks: string[] = []): Promise<RelaySubmission>
   {
-    return this.call('sendToAgent', { to, message: body, submissionID });
+    return this.call('sendToAgent', { to, message: body, submissionID, ...(artifactLinks.length ? { artifactLinks } : {}) });
   }
 
-  reply(threadID: string, body: string, submissionID: string, messageID?: string): Promise<RelaySubmission>
+  reply(threadID: string, body: string, submissionID: string, messageID?: string,
+    artifactLinks: string[] = []): Promise<RelaySubmission>
   {
-    return this.call('relayReplyThread', { threadID, body, submissionID, ...(messageID ? { messageID } : {}) });
+    return this.call('relayReplyThread', {
+      threadID, body, submissionID, ...(messageID ? { messageID } : {}),
+      ...(artifactLinks.length ? { artifactLinks } : {}),
+    });
   }
 
   async inbox(): Promise<RelayMessage[]>

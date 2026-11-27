@@ -1,23 +1,31 @@
 import { BridgeError } from './BridgeError.js';
 import type { BridgeBinding, MessagingBackend, NativeMessage, RelayClient, RelayMessage } from './Contracts.js';
 import { DeliveryStore } from './DeliveryStore.js';
+import { AccessPolicy } from './AccessPolicy.js';
+import { ConversationRouter } from './ConversationRouter.js';
+import { Logger } from './Logger.js';
 
 export class Bridge
 {
   private busy = false;
+  private readonly router: ConversationRouter;
+  private readonly logger = new Logger('bridge');
 
   constructor(
     private readonly binding: BridgeBinding,
     private readonly store: DeliveryStore,
     private readonly relay: RelayClient,
     private readonly backend: MessagingBackend,
-  ) {}
+    private readonly policy: AccessPolicy,
+  )
+  {
+    this.router = new ConversationRouter(store);
+  }
 
   receive(message: NativeMessage): boolean
   {
-    if (message.senderID !== this.binding.employeeID ||
-        message.conversationID !== this.binding.employeeID ||
-        message.senderID === this.binding.accountID)
+    if (message.senderID !== message.conversationID || message.senderID === this.binding.accountID ||
+        !this.policy.accepts(message.senderID))
     {
       return false;
     }
@@ -27,7 +35,11 @@ export class Bridge
       throw new BridgeError('Invalid native text message.');
     }
 
-    this.store.accept(message);
+    if (this.store.accept(message))
+    {
+      this.logger.info('/native/message/received', { native_message_id: message.messageID });
+    }
+
     return true;
   }
 
@@ -35,26 +47,35 @@ export class Bridge
   {
     for (const message of this.store.pending())
     {
-      const quote = message.replyToID
-        ? this.store.findQuote(message.replyToID, message.conversationID)
-        : undefined;
-
-      if (message.replyToID && !quote)
+      if (!await this.policy.permits(message.senderID))
       {
         this.store.block(message.messageID);
+        this.logger.info('/native/message/blocked', { native_message_id: message.messageID });
         continue;
       }
 
-      const result = quote
-        ? await this.relay.reply(quote.threadID, message.body, message.submissionID, quote.replyMessageID ?? undefined)
-        : await this.relay.send(this.binding.recipientAddress, message.body, message.submissionID);
+      const plan = this.router.plan(message);
+      if (!plan)
+      {
+        this.store.block(message.messageID);
+        this.logger.info('/native/quote/blocked', { native_message_id: message.messageID });
+        continue;
+      }
 
-      if (!result.messageId || !result.threadId || (quote && result.threadId !== quote.threadID))
+      const result = plan.threadID
+        ? await this.relay.reply(plan.threadID, plan.body, message.submissionID,
+          plan.replyMessageID ?? undefined, plan.artifactLinks)
+        : await this.relay.send(this.binding.recipientAddress, plan.body, message.submissionID, plan.artifactLinks);
+
+      if (!result.messageId || !result.threadId || (plan.threadID && result.threadId !== plan.threadID))
       {
         throw new BridgeError('Invalid Relay submission correlation.');
       }
 
       this.store.recordSubmission(message, result);
+      this.logger.info('/relay/message/submitted', {
+        native_message_id: message.messageID, relay_message_id: result.messageId, relay_thread_id: result.threadId,
+      });
     }
   }
 
@@ -69,7 +90,7 @@ export class Bridge
 
     const conversationID = this.store.findThread(message.threadId);
 
-    if (conversationID !== this.binding.employeeID || !this.store.claim(message))
+    if (!conversationID || !await this.policy.permits(conversationID) || !this.store.claim(message))
     {
       return;
     }
@@ -83,6 +104,9 @@ export class Bridge
     }
 
     this.store.recordDelivery(message, conversationID, nativeID);
+    this.logger.info('/native/message/delivered', {
+      native_message_id: nativeID, relay_message_id: message.id, relay_thread_id: message.threadId,
+    });
   }
 
   private async receiveInbox(): Promise<void>

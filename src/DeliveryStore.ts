@@ -13,7 +13,15 @@ export enum DeliveryState
 }
 
 export type InboundRecord = NativeMessage & { submissionID: string };
-type ConversationRoute = { conversationID: string; threadID: string; replyMessageID: string | null };
+export type ConversationRoute = { conversationID: string; threadID: string; replyMessageID: string | null };
+
+export interface SubmissionPlan
+{
+  threadID: string | null;
+  replyMessageID: string | null;
+  body: string;
+  artifactLinks: string[];
+}
 
 export class DeliveryStore
 {
@@ -42,21 +50,57 @@ export class DeliveryStore
       CREATE TABLE IF NOT EXISTS outbound (
         relay_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, state INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS inbound_artifacts (
+        message_id TEXT PRIMARY KEY, links TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS submission_plans (
+        message_id TEXT PRIMARY KEY, plan TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS inbox_checkpoint (
         id INTEGER PRIMARY KEY CHECK(id = 1), message_id TEXT NOT NULL
       );
     `);
 
-    const value = JSON.stringify([binding.sessionID, binding.accountID, binding.employeeID,
-      binding.recipientSessionID, binding.recipientAddress]);
-    this.database.prepare('INSERT OR IGNORE INTO bridge_binding VALUES (1, ?)').run(value);
-    const row = this.database.prepare('SELECT value FROM bridge_binding WHERE id = 1').get();
-
-    if (row?.value !== value)
+    try
+    {
+      this.bindIdentity(binding);
+    }
+    catch (error)
     {
       this.database.close();
-      throw new BridgeError('Stored bridge identity or access binding differs from configuration.');
+      throw error;
     }
+  }
+
+  private bindIdentity(binding: BridgeBinding): void
+  {
+    const identity = [binding.sessionID, binding.accountID, binding.recipientSessionID, binding.recipientAddress];
+    const value = JSON.stringify(identity);
+
+    this.transaction(() =>
+    {
+      this.database.prepare('INSERT OR IGNORE INTO bridge_binding VALUES (1, ?)').run(value);
+      const row = this.database.prepare('SELECT value FROM bridge_binding WHERE id = 1').get();
+
+      if (row?.value === value)
+      {
+        return;
+      }
+
+      const previous = JSON.parse(String(row?.value)) as unknown;
+      if (!Array.isArray(previous) || previous.length !== 5 ||
+          JSON.stringify([previous[0], previous[1], previous[3], previous[4]]) !== value)
+      {
+        throw new BridgeError('Stored bridge identity differs from configuration.');
+      }
+
+      if (this.pendingCount)
+      {
+        throw new BridgeError('Complete pending submissions with the previous pilot before upgrading.');
+      }
+
+      this.database.prepare('UPDATE bridge_binding SET value = ? WHERE id = 1').run(value);
+    });
   }
 
   private transaction(action: () => void): void
@@ -75,27 +119,63 @@ export class DeliveryStore
     }
   }
 
-  accept(message: NativeMessage): void
+  accept(message: NativeMessage): boolean
   {
-    this.database.prepare(`
-      INSERT OR IGNORE INTO inbound
-      (message_id, conversation_id, sender_id, body, reply_to_id, submission_id, state)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(message.messageID, message.conversationID, message.senderID, message.body,
-      message.replyToID ?? null, randomUUID(), DeliveryState.Pending);
+    let accepted = false;
+
+    this.transaction(() =>
+    {
+      const result = this.database.prepare(`
+        INSERT OR IGNORE INTO inbound
+        (message_id, conversation_id, sender_id, body, reply_to_id, submission_id, state)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(message.messageID, message.conversationID, message.senderID, message.body,
+        message.replyToID ?? null, randomUUID(), DeliveryState.Pending);
+      accepted = Number(result.changes) === 1;
+
+      if (accepted && message.artifactLinks?.length)
+      {
+        this.database.prepare('INSERT INTO inbound_artifacts VALUES (?, ?)')
+          .run(message.messageID, JSON.stringify(message.artifactLinks));
+      }
+    });
+
+    return accepted;
   }
 
   pending(): InboundRecord[]
   {
     return this.database.prepare(`
-      SELECT message_id AS messageID, conversation_id AS conversationID, sender_id AS senderID,
-             body, reply_to_id AS replyToID, submission_id AS submissionID
-      FROM inbound WHERE state = ? ORDER BY rowid
+      SELECT i.message_id AS messageID, i.conversation_id AS conversationID, i.sender_id AS senderID,
+             i.body, i.reply_to_id AS replyToID, i.submission_id AS submissionID, a.links
+      FROM inbound i LEFT JOIN inbound_artifacts a ON a.message_id = i.message_id
+      WHERE i.state = ? ORDER BY i.rowid
     `).all(DeliveryState.Pending).map(row => ({
       messageID: String(row.messageID), conversationID: String(row.conversationID),
       senderID: String(row.senderID), body: String(row.body), submissionID: String(row.submissionID),
+      artifactLinks: row.links === null ? [] : JSON.parse(String(row.links)) as string[],
       ...(row.replyToID === null ? {} : { replyToID: String(row.replyToID) }),
     }));
+  }
+
+  currentThread(conversationID: string): ConversationRoute | undefined
+  {
+    return this.database.prepare(`
+      SELECT l.conversation_id AS conversationID, l.thread_id AS threadID, NULL AS replyMessageID
+      FROM inbound i JOIN native_links l ON l.native_id = i.message_id
+      WHERE i.conversation_id = ? AND i.state = ? ORDER BY i.rowid DESC LIMIT 1
+    `).get(conversationID, DeliveryState.Complete) as ConversationRoute | undefined;
+  }
+
+  submissionPlan(messageID: string): SubmissionPlan | undefined
+  {
+    const row = this.database.prepare('SELECT plan FROM submission_plans WHERE message_id = ?').get(messageID);
+    return typeof row?.plan === 'string' ? JSON.parse(row.plan) as SubmissionPlan : undefined;
+  }
+
+  savePlan(messageID: string, plan: SubmissionPlan): void
+  {
+    this.database.prepare('INSERT INTO submission_plans VALUES (?, ?)').run(messageID, JSON.stringify(plan));
   }
 
   findQuote(messageID: string, conversationID: string): ConversationRoute | undefined

@@ -1,5 +1,4 @@
 import { BridgeError } from './BridgeError.js';
-import { randomBytes } from 'node:crypto';
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -7,7 +6,9 @@ import { createInterface } from 'node:readline/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { Bridge } from './Bridge.js';
-import type { BridgeBinding } from './Contracts.js';
+import { AccessMode, AccessPolicy } from './AccessPolicy.js';
+import { AccessSetup } from './AccessSetup.js';
+import { BridgeConfiguration } from './BridgeConfiguration.js';
 import { DeliveryStore } from './DeliveryStore.js';
 import { LineBackend } from './LineBackend.js';
 import { LineStorage } from './LineStorage.js';
@@ -16,16 +17,11 @@ import { OAuthCredentials } from './OAuthCredentials.js';
 import { PrivateJSON } from './PrivateJSON.js';
 import { RemoteRelayClient } from './RemoteRelayClient.js';
 
-type Config = {
-  session_id: string; canonical: string; account_id: string; employee_id: string;
-  recipient_session_id: string; recipient_address: string;
-};
-
 class Application
 {
   private static readonly logger = new Logger('bridge');
   private readonly directory = resolve(process.env.NUWA_BRIDGE_HOME ?? join(homedir(), '.config', 'nuwa-agent-relay-bridge'));
-  private readonly config = new PrivateJSON(join(this.directory, 'config.json'));
+  private readonly config = new BridgeConfiguration(new PrivateJSON(join(this.directory, 'config.json')));
   private readonly oauthFile = new PrivateJSON(join(this.directory, 'oauth.json'));
   private readonly oauth = new OAuthCredentials(this.oauthFile);
   private readonly relay = new RemoteRelayClient(this.oauth);
@@ -47,7 +43,8 @@ class Application
   {
     if (this.config.exists)
     {
-      throw new BridgeError('Bridge is already configured; preserve its registered identity.');
+      await this.configureAccess();
+      return;
     }
 
     if (!this.oauthFile.exists)
@@ -73,22 +70,12 @@ class Application
 
       try
       {
-        const challenge = 'nuwa-pair-' + randomBytes(8).toString('hex');
-        console.log('From the approved employee LINE account, send this exact text to the company account:');
-        console.log(challenge);
-        const employeeID = await line.pairEmployee(challenge);
-        const approval = await input.question('Approve that employee as the pilot sender? Type yes: ');
-
-        if (approval.trim() !== 'yes')
-        {
-          throw new BridgeError('Employee pairing was not approved.');
-        }
-
+        const access = await new AccessSetup(input, () => line.listFriends()).select();
         this.config.write({
           session_id: identity.sessionID, canonical: identity.canonical, account_id: line.accountID,
-          employee_id: employeeID, recipient_session_id: recipient.id, recipient_address: recipient.canonical,
-        } satisfies Config);
-        console.log('Bridge setup complete. Run nuwa-bridge start.');
+          recipient_session_id: recipient.id, recipient_address: recipient.canonical, access,
+        });
+        this.printStart();
       }
       finally
       {
@@ -101,26 +88,41 @@ class Application
     }
   }
 
-  private binding(config: Config): BridgeBinding
+  private printStart(): void
   {
-    const values = [config.session_id, config.canonical, config.account_id, config.employee_id,
-      config.recipient_session_id, config.recipient_address];
+    const executable = process.env.NUWA_BRIDGE_EXECUTABLE ?? 'nuwa-bridge';
+    console.log('Bridge setup complete. Run: ' + executable + ' start');
+  }
 
-    if (values.some(value => typeof value !== 'string' || !value))
+  private async configureAccess(): Promise<void>
+  {
+    const config = this.config.read();
+    const line = await LineBackend.connect(this.storage, false);
+    const input = createInterface({ input: process.stdin, output: process.stdout });
+
+    try
     {
-      throw new BridgeError('Incomplete bridge configuration.');
-    }
+      if (line.accountID !== config.account_id)
+      {
+        throw new BridgeError('LINE account differs from its configured identity.');
+      }
 
-    return {
-      sessionID: config.session_id, accountID: config.account_id, employeeID: config.employee_id,
-      recipientSessionID: config.recipient_session_id, recipientAddress: config.recipient_address,
-    };
+      console.log('Current access mode:', AccessMode[config.access.mode]);
+      config.access = await new AccessSetup(input, () => line.listFriends()).select();
+      this.config.write(config);
+      this.printStart();
+    }
+    finally
+    {
+      input.close();
+      line.stop();
+    }
   }
 
   private async start(): Promise<void>
   {
-    const config = this.config.read<Config>();
-    const binding = this.binding(config);
+    const config = this.config.read();
+    const binding = this.config.binding(config);
 
     await this.relay.verifyIdentity(binding.sessionID, config.canonical);
     const recipient = await this.relay.resolve(binding.recipientAddress);
@@ -140,7 +142,7 @@ class Application
       }
 
       const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), binding);
-      const bridge = new Bridge(binding, store, this.relay, line);
+      const bridge = new Bridge(binding, store, this.relay, line, new AccessPolicy(config.access, line));
 
       let stopped = false;
       const stop = () => { stopped = true; line.stop(); };
@@ -188,13 +190,14 @@ class Application
 
   private status(): void
   {
-    const config = this.config.read<Config>();
-    const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), this.binding(config));
+    const config = this.config.read();
+    const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), this.config.binding(config));
 
     try
     {
       console.log('Bridge address:', config.canonical);
       console.log('Designated assistant:', config.recipient_address);
+      console.log('Access mode:', AccessMode[config.access.mode]);
       console.log('Pending inbound submissions:', store.pendingCount);
       console.log('Blocked inbound messages:', store.blocked);
       console.log('Uncertain native deliveries:', store.unresolved);
@@ -216,7 +219,7 @@ class Application
 
     if (!command || command === '--help' || command === 'help')
     {
-      console.log('Usage: nuwa-bridge <setup | start | status | --version>');
+      console.log('Usage: nuwa-bridge <setup | access | start | status | --version>');
       return;
     }
 
@@ -228,9 +231,9 @@ class Application
       return;
     }
 
-    if (command !== 'setup' && command !== 'start')
+    if (command !== 'setup' && command !== 'access' && command !== 'start')
     {
-      throw new BridgeError('Use setup, start, or status.');
+      throw new BridgeError('Use setup, access, start, or status.');
     }
 
     const lockPath = join(this.directory, 'bridge.lock');
@@ -241,6 +244,10 @@ class Application
       if (command === 'setup')
       {
         await this.setup();
+      }
+      else if (command === 'access')
+      {
+        await this.configureAccess();
       }
       else
       {
