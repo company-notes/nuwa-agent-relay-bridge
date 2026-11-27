@@ -36,7 +36,8 @@ export class BridgeConfiguration
     };
     const config: BridgeConfig = {
       session_id: saved.session_id, canonical: saved.canonical, account_id: saved.account_id,
-      recipient_session_id: saved.recipient_session_id, recipient_address: saved.recipient_address, access, groups: saved.groups ?? GroupPolicy.disabled,
+      recipient_session_id: saved.recipient_session_id, recipient_address: saved.recipient_address,
+      access, groups: saved.groups ?? GroupPolicy.disabled,
     };
 
     this.binding(config);

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 
+import { GroupMode, GroupPolicy } from '../src/GroupPolicy.js';
 import { AccessMode } from '../src/AccessPolicy.js';
 import { BridgeConfiguration } from '../src/BridgeConfiguration.js';
 import { DeliveryStore } from '../src/DeliveryStore.js';
@@ -22,6 +23,7 @@ test('an existing pilot upgrade preserves identity and approval until an adminis
   const previous = config.read();
 
   assert.deepEqual(previous.access, { mode: AccessMode.Allowlist, allowed_user_ids: ['approved'] });
+  assert.deepEqual(previous.groups, GroupPolicy.disabled);
 
   const databasePath = join(directory, 'delivery.sqlite3');
   const database = new DatabaseSync(databasePath);
@@ -36,6 +38,12 @@ test('an existing pilot upgrade preserves identity and approval until an adminis
   config.write({ ...previous, access: { mode: AccessMode.Open, allowed_user_ids: [] } });
 
   assert.equal(config.read().canonical, 'example/line/main');
+  assert.equal(config.read().access.mode, AccessMode.Open);
+
+  const groups = { mode: GroupMode.Allowlist, approved_groups: [{ id: 'company', member_ids: ['line', 'approved'] }] };
+  config.write({ ...config.read(), groups });
+
+  assert.deepEqual(config.read().groups, groups);
   assert.equal(config.read().access.mode, AccessMode.Open);
 
   const reopened = new DeliveryStore(databasePath, config.binding(config.read()));

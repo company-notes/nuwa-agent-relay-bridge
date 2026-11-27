@@ -2,7 +2,7 @@ import { BridgeError } from './BridgeError.js';
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createInterface } from 'node:readline/promises';
+import { createInterface, type Interface } from 'node:readline/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { Bridge } from './Bridge.js';
@@ -10,7 +10,7 @@ import { AccessMode, AccessPolicy } from './AccessPolicy.js';
 import { GroupMode, GroupPolicy } from './GroupPolicy.js';
 import { GroupSetup } from './GroupSetup.js';
 import { AccessSetup } from './AccessSetup.js';
-import { BridgeConfiguration } from './BridgeConfiguration.js';
+import { BridgeConfiguration, type BridgeConfig } from './BridgeConfiguration.js';
 import { DeliveryStore } from './DeliveryStore.js';
 import { LineBackend } from './LineBackend.js';
 import { LineStorage } from './LineStorage.js';
@@ -99,30 +99,23 @@ class Application
 
   private async configureAccess(): Promise<void>
   {
-    const config = this.config.read();
-    const line = await LineBackend.connect(this.storage, false);
-    const input = createInterface({ input: process.stdin, output: process.stdout });
-
-    try
+    await this.configurePolicy(async (config, line, input) =>
     {
-      if (line.accountID !== config.account_id)
-      {
-        throw new BridgeError('LINE account differs from its configured identity.');
-      }
-
       console.log('Current access mode:', AccessMode[config.access.mode]);
       config.access = await new AccessSetup(input, () => line.listFriends()).select();
-      this.config.write(config);
-      this.printStart();
-    }
-    finally
-    {
-      input.close();
-      line.stop();
-    }
+    });
   }
 
   private async configureGroups(): Promise<void>
+  {
+    await this.configurePolicy(async (config, line, input) =>
+    {
+      console.log('Current group mode:', GroupMode[(config.groups ?? GroupPolicy.disabled).mode]);
+      config.groups = await new GroupSetup(input, () => line.listGroups()).select();
+    });
+  }
+
+  private async configurePolicy(update: (config: BridgeConfig, line: LineBackend, input: Interface) => Promise<void>): Promise<void>
   {
     const config = this.config.read();
     const line = await LineBackend.connect(this.storage, false);
@@ -135,8 +128,7 @@ class Application
         throw new BridgeError('LINE account differs from its configured identity.');
       }
 
-      console.log('Current group mode:', GroupMode[(config.groups ?? GroupPolicy.disabled).mode]);
-      config.groups = await new GroupSetup(input, () => line.listGroups()).select();
+      await update(config, line, input);
       this.config.write(config);
       this.printStart();
     }
