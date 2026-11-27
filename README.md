@@ -51,19 +51,29 @@ The bridge is independent of the AI platform and model provider. Changing the de
 
 Download the standalone executable for the host from [GitHub Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases). The Linux x64 and ARM64 pilots bundle their Node.js runtime and dependencies. Select the asset matching the host architecture, give it execute permission, then run it with `setup` and `start`. See [Pilot acceptance](docs/Pilot.md) for the complete onboarding and VPS instructions.
 
-The initial deployment uses one company LINE account, one bridge instance, one bridge address, and one designated AI assistant. Employees communicate through authorized one-to-one text conversations. The company assistant interprets ordinary messages and delegates specialized work through its existing Relay connection.
+The initial deployment uses one company LINE account, one bridge instance, one bridge address, and one designated AI assistant. People use ordinary private LINE conversations with the company account. The administrator selects the access policy once; a permitted sender can chat immediately through LINE. The company assistant interprets ordinary messages and delegates specialized work through its existing Relay connection.
 
 An administrator installs the bridge on an always-on computer or VPS, authorizes it with Nuwa, and connects the company's messaging account. The following is the standard onboarding sequence:
 
 1. Complete Nuwa OAuth authorization and select the company organization.
 2. Register or recover the bridge's own Agent and Session and display its canonical address.
-3. Connect the messaging account through the selected backend and securely retain the authorized login state.
-4. Resolve and verify the designated AI assistant's canonical address and its receive capability.
-5. Approve the messaging identities permitted to contact the assistant and establish their access policy.
+3. Resolve and verify the designated AI assistant's canonical address and its receive capability.
+4. Connect the messaging account through the selected backend and securely retain the authorized login state.
+5. Select the access policy: Open, Friends, or Allowlist.
 6. Start the background service and verify a real incoming message and its reply.
 7. Keep the same bridge identity, login state, and conversation mappings across restarts and upgrades.
 
 The first messaging backend is [LINEJS](https://github.com/evex-dev/linejs), a TypeScript library for communicating with LINE using a regular account through an unofficial protocol. This integration is suitable for controlled evaluation; account availability and protocol compatibility depend on LINE. Review applicable terms, credential handling, and organizational approval before enabling it for real business use. The backend interface supports an official LINE Messaging API implementation and other messaging platforms in the same repository.
+
+### Access policies
+
+| Policy | Eligible private conversations |
+| --- | --- |
+| Open | Any sender whose private message is delivered by LINE. Requires explicit administrator confirmation. |
+| Friends | Senders on the company account's contact list, excluding blocked contacts. |
+| Allowlist | The specific LINE contact IDs selected by the administrator from the contact directory. |
+
+Manage friend additions, blocking and incoming-message restrictions using LINE. Stop the bridge and run its `access` command to change the policy. The selected policy applies to both incoming requests and delayed replies. Use a designated assistant whose permitted tools, data and memory are safe for every allowed sender. A shared Bridge identity provides separate Relay conversation routes, not separate AI tool grants or isolated native AI context by itself.
 
 ### Example conversation
 
@@ -71,7 +81,7 @@ The first messaging backend is [LINEJS](https://github.com/evex-dev/linejs), a T
 2. The bridge accepts the message, records its native sender, conversation and message identifiers, and submits it to the configured assistant through Relay.
 3. The assistant receives it in its own platform conversation and performs the work or delegates it to other coworkers.
 4. The assistant replies to the original Relay thread. The bridge receives the reply and delivers it to the originating employee's conversation.
-5. The employee continues the work by replying to the associated message. The bridge resolves the correct Relay thread from the persisted correlation.
+5. The employee sends an ordinary follow-up in the same private chat. The bridge continues its active Relay Thread. A quoted reply selects the matching thread, and `/new <message>` starts a separate topic when desired.
 
 Work can take minutes or longer. The bridge preserves the return route across asynchronous execution, temporary disconnection, and process restarts.
 
@@ -99,7 +109,7 @@ Use the published [Nuwa onboarding guide](https://mcp.agent-relay.company-notes.
 
 - Authenticate the backend connection and validate the native sender against the configured access policy.
 - Persist the source event using the backend account, conversation and native message identifiers.
-- Resolve an explicit reply to its existing authorized Relay thread. A fresh request starts a new thread at the configured destination.
+- Resolve the active thread for the private conversation. A valid explicit quote selects its original thread; `/new <message>` starts another thread. Persist the exact submission plan before making the Relay request.
 - Submit using the bridge's authorized session and a persisted unique submission identifier. Record the returned message and thread identifiers and their native correlation.
 
 ### From an AI assistant to a person
@@ -109,21 +119,29 @@ Use the published [Nuwa onboarding guide](https://mcp.agent-relay.company-notes.
 - Claim the delivery atomically, send the content to the authorized native conversation, and record the native submission evidence.
 - Preserve the relationship between the returned native message and Relay thread so the employee can continue the correct conversation.
 
-Concurrent requests in the same chat retain distinct thread mappings. An ambiguous continuation requires clarification before routing. Messages arriving from different employees remain isolated even when they share an AI assistant.
+Each private conversation has its own current thread, and delayed replies retain their original routes across new topics. Cross-chat or unknown quoted-message IDs are blocked and recorded. Relay and native reply routing are isolated by conversation; the receiving AI platform must independently enforce its own conversation context and tool permissions.
 
 ### Security and delivery invariants
 
 - The bridge's Relay session is the authenticated sender. Native sender metadata identifies the human origin but conveys no independent Nuwa authorization. The AI assistant's enterprise tool access must respect the verified employee's policy; enforce permissions outside natural-language prompts.
-- Use explicit administrator-approved identity bindings. A display name or message body is untrusted data and cannot establish authorization or change the destination.
+- Apply the administrator's access policy using the authenticated LINE sender ID. Display names and message bodies are untrusted and cannot establish authorization or change the destination.
 - Keep credentials and login state in protected storage, separate from ordinary configuration. Use least-privilege grants and redact secrets and message contents from routine logs.
 - Persist a unique source event and submission identifier before external delivery. Repeated events, overlapping workers and restarts must resolve to the same processing record.
 - Retry confirmed pre-submission failures using the same identifier and request. For ambiguous submission outcomes, preserve an uncertain state and reconcile available delivery evidence before repeating a native send.
 - Prevent feedback loops from messages emitted by the bridge itself. Deliver replies only to the authorized original conversation; unresolved routes remain pending for investigation.
 - Distinguish service acceptance from actual native delivery. Record operational failures clearly and make recoverable pending work visible through diagnostics.
 
+### Native content and delivery diagnostics
+
+Text and quoted replies use the original message text and verified quote association. A sticker is represented by a descriptive message and, when available, a validated public LINE sticker image URL in Relay's artifact links. Private image, audio, video and file events carry a content-type notice until authorized attachment storage and retrieval are available. Their private bytes are not yet transferred.
+
+The terminal records native message IDs, Relay message and thread IDs, and native delivery submission IDs. These distinguish receipt by the bridge, Relay submission, and successful native send. A native send acknowledgment is not a human read receipt. The `status` command reports pending, blocked and uncertain deliveries.
+
+The receiver may use an existing verified office Gateway or a direct verified Wake for an independently connected assistant. See [Rakazo direct receiving](docs/RakazoDirectWake.md).
+
 ## Acceptance and engineering workflow
 
-The primary acceptance scenario is a real two-way conversation: an approved LINE user sends a request, the designated assistant receives it in its native platform, performs the work, replies through the original Relay thread, and the user sees the result in LINE. An additional instruction continues that same thread. Test with an isolated organization, bridge account and assistant.
+The primary acceptance scenario is a real two-way conversation: a permitted LINE user sends a request, the designated assistant receives it in its native platform, performs the work, replies through the original Relay thread, and the user sees the result in LINE. An ordinary additional instruction continues that same thread; a second user's independent conversation must return only to that user. Test with an isolated organization, bridge account and assistant.
 
 Cover asynchronous replies, concurrent conversations, restart recovery, duplicate events, uncertain submissions, unauthorized senders, and cross-conversation isolation. Verify the externally visible result and persisted state at each important boundary. A controlled substitute for an external service proves only the behavior within that test boundary; real LINE and Relay acceptance establishes interoperability.
 

@@ -4,6 +4,11 @@ export class Logger
 {
   constructor(private readonly moduleName: string) {}
 
+  info(event: string, identifiers: { native_message_id?: string; relay_message_id?: string; relay_thread_id?: string }): void
+  {
+    console.log(JSON.stringify({ module: this.moduleName, event, ...identifiers }));
+  }
+
   failure(event: string, error: unknown): void
   {
     const errorType = error instanceof Error ? error.name : 'UnknownError';

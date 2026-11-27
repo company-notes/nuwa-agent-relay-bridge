@@ -5,13 +5,13 @@ export interface NativeMessage
   senderID: string;
   body: string;
   replyToID?: string;
+  artifactLinks?: string[];
 }
 
 export interface BridgeBinding
 {
   sessionID: string;
   accountID: string;
-  employeeID: string;
   recipientSessionID: string;
   recipientAddress: string;
 }
@@ -35,12 +35,13 @@ export interface RelaySubmission
 
 export interface RelayClient
 {
-  send(to: string, body: string, submissionID: string): Promise<RelaySubmission>;
-  reply(threadID: string, body: string, submissionID: string, messageID?: string): Promise<RelaySubmission>;
+  send(to: string, body: string, submissionID: string, artifactLinks?: string[]): Promise<RelaySubmission>;
+  reply(threadID: string, body: string, submissionID: string, messageID?: string, artifactLinks?: string[]): Promise<RelaySubmission>;
   inbox(): Promise<RelayMessage[]>;
 }
 
 export interface MessagingBackend
 {
   send(conversationID: string, body: string): Promise<string>;
+  isFriend(senderID: string): Promise<boolean>;
 }
