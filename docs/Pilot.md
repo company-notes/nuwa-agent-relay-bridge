@@ -46,6 +46,8 @@ Join the company LINE account to the desired internal group using the LINE app. 
 
 In the group, use LINE's native @Mention to select the company account and ask a question. Quote the assistant's reply to continue without another mention. Normal group chatter and @Everyone stay local. The bridge forwards only addressed messages and replies in the original group. Keep group participants informed and verify that the assistant's native context and tool permissions are suitable for the group.
 
+Group roster diagnostics distinguish unavailable chat data, unsupported chat type, missing member map, missing account or sender, and changed approved roster. The logs report a reason and member count when available, without listing member identifiers or message content. Open group access still requires a verified current roster.
+
 ## Acceptance
 
 Send an ordinary question, receive its reply, and ask a follow-up without quoting. Verify the same Relay Thread. Have a second permitted person add the company account and chat normally. Interleave the two conversations and verify that the replies and AI context stay isolated. Send a LINE sticker and verify the corresponding Relay message and public image link. Send a private image and confirm its content-type notice. Use `/new <message>` for a distinct topic; quote an earlier AI reply to continue that specific thread. Restart and repeat the continuation. Verify that a sender excluded by Friends or Allowlist cannot trigger work, and that revoked access prevents a delayed reply. 
