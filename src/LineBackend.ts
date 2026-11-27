@@ -4,6 +4,7 @@ import { BaseClient } from '@evex-dev/linejs/base';
 
 import type { MessagingBackend, NativeMessage } from './Contracts.js';
 import { LineStorage } from './LineStorage.js';
+import { LineLoginPrompt } from './LineLoginPrompt.js';
 import { Logger } from './Logger.js';
 
 export class LineBackend implements MessagingBackend
@@ -31,20 +32,30 @@ export class LineBackend implements MessagingBackend
 
     const saved = await storage.get(LineBackend.tokenKey);
 
-    if (typeof saved === 'string' && saved)
-    {
-      await base.loginProcess.login({ authToken: saved });
-    }
-    else
-    {
-      if (!interactive)
-      {
-        throw new BridgeError('LINE authorization is required. Run setup.');
-      }
+    const prompt = new LineLoginPrompt();
 
-      base.on('qrcall', url => console.log('Open the LINE login URL on your authorized device:', url));
-      base.on('pincall', pin => console.log('Enter this temporary PIN in LINE:', pin));
-      await base.loginProcess.login({ qr: true });
+    if (!(typeof saved === 'string' && saved) && !interactive)
+    {
+      throw new BridgeError('LINE authorization is required. Run setup.');
+    }
+
+    try
+    {
+      if (typeof saved === 'string' && saved)
+      {
+        prompt.resume();
+        await base.loginProcess.login({ authToken: saved });
+      }
+      else
+      {
+        base.on('qrcall', url => prompt.qr(url));
+        base.on('pincall', pin => prompt.pin(pin));
+        await base.loginProcess.login({ qr: true });
+      }
+    }
+    catch (error)
+    {
+      throw prompt.failure(error);
     }
 
     await pendingSave;
