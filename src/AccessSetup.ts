@@ -20,6 +20,7 @@ export class AccessSetup
     if (choice === '1')
     {
       const confirmed = (await this.input.question('Confirm public access to this assistant (type yes): ')).trim();
+
       if (confirmed !== 'yes')
       {
         throw new BridgeError('Public access was not confirmed.');

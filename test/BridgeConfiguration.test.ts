@@ -34,6 +34,7 @@ test('an existing pilot upgrade preserves identity and approval until an adminis
   store.close();
 
   config.write({ ...previous, access: { mode: AccessMode.Open, allowed_user_ids: [] } });
+
   assert.equal(config.read().canonical, 'example/line/main');
   assert.equal(config.read().access.mode, AccessMode.Open);
 

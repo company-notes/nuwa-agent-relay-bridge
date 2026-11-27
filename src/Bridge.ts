@@ -55,6 +55,7 @@ export class Bridge
       }
 
       const plan = this.router.plan(message);
+
       if (!plan)
       {
         this.store.block(message.messageID);

@@ -39,6 +39,7 @@ export class BridgeConfiguration
 
     this.binding(config);
     AccessPolicy.validate(config.access);
+
     return config;
   }
 

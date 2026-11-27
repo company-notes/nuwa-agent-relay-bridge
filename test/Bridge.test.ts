@@ -37,6 +37,7 @@ class ControlledRelay implements RelayClient
   async reply(thread: string, body: string, id: string, replyTo?: string, artifactLinks?: string[]): Promise<RelaySubmission>
   {
     const prior = this.submissions.find(item => item.id === id);
+
     if (!prior)
     {
       this.submissions.push({ id, thread, body, replyTo, artifactLinks });
@@ -189,11 +190,13 @@ test('lost Relay response and repeated native event preserve one submission acro
 
   s.request('request-1', 'Prepare report');
   await s.bridge.cycle();
+
   assert.equal(s.relay.submissions.length, 1);
   assert.equal(s.relay.submissions[0]!.id, id);
 
   s.answer(s.relay.submissions[0]!.thread);
   await s.bridge.cycle();
+
   assert.equal(s.messaging.deliveries.length, 1);
 });
 
@@ -211,6 +214,7 @@ test('uncertain native send is preserved for reconciliation rather than sent twi
 
   s.restart();
   await s.bridge.cycle();
+
   assert.equal(s.messaging.deliveries.length, 1);
   assert.equal(s.store.unresolved, 1);
 });
@@ -247,6 +251,7 @@ test('bounded inbox with no known checkpoint fails visibly', async t =>
   }
 
   await assert.rejects(s.bridge.cycle(), /saturated/);
+
   assert.equal(s.store.checkpoint, undefined);
   assert.equal(s.messaging.deliveries.length, 0);
 });
@@ -305,6 +310,7 @@ test('friend access follows the company contact directory and revoked contacts r
   s.request('stranger', 'Not a friend', undefined, 'stranger');
   s.request('friend', 'Hello');
   await s.bridge.cycle();
+
   assert.equal(s.relay.submissions.length, 1);
 
   s.messaging.friends.delete('employee');

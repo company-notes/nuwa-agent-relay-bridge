@@ -22,6 +22,7 @@ test('a LINE sticker is forwarded even when the native event has no text', () =>
 
   assert.equal(message?.body, '[LINE sticker]');
   assert.equal(message?.conversationID, 'friend');
+
   assert.deepEqual(message?.artifactLinks, ['https://stickershop.line-scdn.net/stickershop/v1/sticker/123/android/sticker.png']);
 });
 

@@ -8,6 +8,7 @@ export class ConversationRouter
   plan(message: InboundRecord): SubmissionPlan | undefined
   {
     const existing = this.store.submissionPlan(message.messageID);
+
     if (existing)
     {
       return existing;
@@ -30,6 +31,7 @@ export class ConversationRouter
     };
 
     this.store.savePlan(message.messageID, plan);
+
     return plan;
   }
 }

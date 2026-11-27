@@ -42,6 +42,7 @@ export class LineContactDirectory
     for (let offset = 0; offset < ids.length; offset += 50)
     {
       const contacts = await this.base.talk.getContacts({ mids: ids.slice(offset, offset + 50) });
+
       for (const contact of contacts)
       {
         names.set(contact.mid, contact.displayName);

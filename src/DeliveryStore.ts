@@ -88,6 +88,7 @@ export class DeliveryStore
       }
 
       const previous = JSON.parse(String(row?.value)) as unknown;
+
       if (!Array.isArray(previous) || previous.length !== 5 ||
           JSON.stringify([previous[0], previous[1], previous[3], previous[4]]) !== value)
       {
@@ -170,6 +171,7 @@ export class DeliveryStore
   submissionPlan(messageID: string): SubmissionPlan | undefined
   {
     const row = this.database.prepare('SELECT plan FROM submission_plans WHERE message_id = ?').get(messageID);
+
     return typeof row?.plan === 'string' ? JSON.parse(row.plan) as SubmissionPlan : undefined;
   }
 
