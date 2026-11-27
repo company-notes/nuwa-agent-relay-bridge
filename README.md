@@ -49,7 +49,7 @@ The bridge is independent of the AI platform and model provider. Changing the de
 
 ## Standard deployment and use
 
-Download the standalone executable for the host from [GitHub Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases). The Linux x64 pilot bundles its Node.js runtime and dependencies. Give it execute permission, then run `./nuwa-bridge-linux-x64.run setup` and `./nuwa-bridge-linux-x64.run start`. See [Pilot acceptance](docs/Pilot.md) for the complete onboarding and VPS instructions.
+Download the standalone executable for the host from [GitHub Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases). The Linux x64 and ARM64 pilots bundle their Node.js runtime and dependencies. Select the asset matching the host architecture, give it execute permission, then run it with `setup` and `start`. See [Pilot acceptance](docs/Pilot.md) for the complete onboarding and VPS instructions.
 
 The initial deployment uses one company LINE account, one bridge instance, one bridge address, and one designated AI assistant. Employees communicate through authorized one-to-one text conversations. The company assistant interprets ordinary messages and delegates specialized work through its existing Relay connection.
 

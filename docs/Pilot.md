@@ -4,13 +4,24 @@ The pilot uses one company LINE account, one explicitly paired employee, and one
 
 ## Installation
 
-Download the Linux x64 executable from [GitHub Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases). It includes the Node.js runtime, compiled application, and runtime dependencies. The target is a 64-bit glibc Linux host with a standard POSIX shell, tar and gzip (for example, Ubuntu 22.04 or later). Use a directory with enough temporary disk space to unpack the runtime.
+Download the Linux executable matching the host architecture from [GitHub Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases). It includes the Node.js runtime, compiled application, and runtime dependencies. The target is a 64-bit Linux host with glibc 2.28 or later, Linux kernel 4.18 or later, and a standard POSIX shell, tar and gzip. Use a directory with enough temporary disk space to unpack the runtime.
+
+Check the host with `uname -m`, `uname -r`, and `getconf GNU_LIBC_VERSION`. Select the asset based on the machine architecture:
+
+| Machine architecture | Release asset |
+| --- | --- |
+| `x86_64` | `nuwa-bridge-linux-x64.run` |
+| `aarch64` | `nuwa-bridge-linux-arm64.run` |
+
+The original Jetson Nano operating system based on JetPack 4 (Ubuntu 18.04, Linux 4.9) is outside the bundled [Node.js 24.11.0 supported platform baseline](https://github.com/nodejs/node/blob/v24.11.0/BUILDING.md#platform-list). Use a supported host operating system; architecture alone does not establish compatibility.
+
+For example, on ARM64:
 
 ```sh
-chmod +x nuwa-bridge-linux-x64.run
-./nuwa-bridge-linux-x64.run --version
-./nuwa-bridge-linux-x64.run setup
-./nuwa-bridge-linux-x64.run start
+chmod +x nuwa-bridge-linux-arm64.run
+./nuwa-bridge-linux-arm64.run --version
+./nuwa-bridge-linux-arm64.run setup
+./nuwa-bridge-linux-arm64.run start
 ```
 
 Run setup on the host where the service will run. For VPS setup, establish the port forward from your own computer before opening the authorization link:
@@ -27,7 +38,7 @@ The default private data directory is `~/.config/nuwa-agent-relay-bridge`. The `
 
 Use a fresh request for a new task. Quote the assistant's specific LINE response to continue its existing Relay thread. A new unquoted message creates a new thread. Check the assistant's native conversation and the actual LINE reply, including a response delayed beyond the initial request. Restart the bridge and repeat the continuation. Confirm an unpaired LINE account cannot trigger work.
 
-`./nuwa-bridge-linux-x64.run status` reports the bridge address, designated assistant and uncertain native delivery count. Reconcile uncertain sends using actual native delivery evidence before taking recovery action.
+`./nuwa-bridge-linux-arm64.run status` (or the x64 executable with the same command) reports the bridge address, designated assistant and uncertain native delivery count. Reconcile uncertain sends using actual native delivery evidence before taking recovery action.
 
 The Relay inbox exposes a bounded window of 100 messages. The pilot detects a saturated window without a retained checkpoint and requires reconciliation. Continuous event replay and recovery from arbitrary offline intervals require a durable paginated or Wake-based receive contract.
 

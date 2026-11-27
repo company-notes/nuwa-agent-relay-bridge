@@ -1,6 +1,17 @@
 #!/bin/sh
 set -eu
 
+case "$(uname -m)" in
+    x86_64) hostArchitecture=x64 ;;
+    aarch64) hostArchitecture=arm64 ;;
+    *) echo "Unsupported Linux architecture." >&2; exit 1 ;;
+esac
+
+if [ "$(uname -s)" != Linux ] || [ "$hostArchitecture" != "__NUWA_ARCH__" ]; then
+    echo "This executable requires Linux __NUWA_ARCH__. Download the matching release asset." >&2
+    exit 1
+fi
+
 umask 077
 workDir=$(mktemp -d "${TMPDIR:-/tmp}/nuwa-bridge.XXXXXXXX")
 child=

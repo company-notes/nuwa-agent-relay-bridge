@@ -2,7 +2,7 @@ name: Build standalone pilot
 
 on:
   push:
-    branches: [main, feat/bridge-core]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -10,13 +10,26 @@ permissions:
   contents: read
 
 jobs:
-  linux-x64:
-    runs-on: ubuntu-22.04
+  linux:
+    name: Linux ${{ matrix.architecture }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: ubuntu-22.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24.11.0'
+      - name: Verify native runtime architecture
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: test "$(node -p 'process.arch')" = "$EXPECTED_ARCH"
       - run: npm install --ignore-scripts
       - run: npm run check
       - run: npm test
@@ -25,32 +38,37 @@ jobs:
       - run: bash scripts/SmokeLinux.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: nuwa-bridge-linux-x64
+          name: nuwa-bridge-linux-${{ matrix.architecture }}
           path: release/
           if-no-files-found: error
 
   publish:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: linux-x64
+    needs: linux
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: nuwa-bridge-linux-x64
+          pattern: nuwa-bridge-linux-*
+          merge-multiple: true
           path: release
-      - name: Publish pilot executable
+      - name: Publish pilot executables
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          tag=v0.1.0
+          version=$(jq -r .version package.json)
+          tag="v$version"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release $tag already exists; versioned artifacts are immutable."
             exit 1
           fi
-          gh release create "$tag" release/nuwa-bridge-linux-x64.run release/SHA256SUMS \
-            --target "$RELEASE_SHA" --prerelease --title "Nuwa Agent Relay Bridge 0.1.0 (Linux pilot)" \
-            --notes "Standalone Linux x64 executable with bundled Node.js and dependencies. For controlled LINE/Nuwa acceptance testing; one approved employee. See docs/Pilot.md. Live account and cross-platform acceptance are pending."
+
+          (cd release && cat SHA256SUMS-x64 SHA256SUMS-arm64 > SHA256SUMS && sha256sum -c SHA256SUMS)
+          gh release create "$tag" release/nuwa-bridge-linux-x64.run release/nuwa-bridge-linux-arm64.run release/SHA256SUMS \
+            --target "$RELEASE_SHA" --prerelease --title "Nuwa Agent Relay Bridge $version (Linux pilot)" \
+            --notes "Standalone Linux x64 and ARM64 executables with bundled Node.js and dependencies. Supported host baseline: glibc 2.28+ and Linux kernel 4.18+. For controlled LINE/Nuwa acceptance testing; one approved employee. See docs/Pilot.md. Live account and cross-platform acceptance are pending."
