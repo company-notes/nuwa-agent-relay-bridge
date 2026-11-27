@@ -36,3 +36,26 @@ test('the administrator sees joined groups only and invited accounts cannot send
   assert.equal(await directory.members('invited'), undefined);
   assert.equal(await directory.members('missing'), undefined);
 });
+
+test('a joined group with a numeric or omitted default group enum still provides a verified roster', async () =>
+{
+  for (const type of [0, undefined])
+  {
+    const chat = {
+      type, chatMid: 'c-company', chatName: 'Company',
+      extra: { groupExtra: { memberMids: { bot: 1, employee: 2 } } },
+    };
+    const base = {
+      profile: { mid: 'bot' },
+      talk: {
+        getAllChatMids: async () => ({ memberChatMids: ['c-company'] }),
+        getChats: async () => ({ chats: [chat] }),
+        getChat: async () => chat,
+      },
+    } as unknown as BaseClient;
+    const directory = new LineGroupDirectory(base);
+
+    assert.deepEqual(await directory.members('c-company'), ['bot', 'employee']);
+    assert.deepEqual((await directory.list()).map(group => group.id), ['c-company']);
+  }
+});
