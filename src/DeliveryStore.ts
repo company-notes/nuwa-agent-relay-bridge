@@ -220,6 +220,17 @@ export class DeliveryStore
     return typeof row?.conversation_id === 'string' ? row.conversation_id : undefined;
   }
 
+  hasOutbound(messageID: string): boolean
+  {
+    return this.database.prepare('SELECT 1 FROM outbound WHERE relay_id = ?').get(messageID) !== undefined;
+  }
+
+  blockOutbound(message: RelayMessage): void
+  {
+    this.database.prepare('INSERT OR IGNORE INTO outbound VALUES (?, ?, ?)')
+      .run(message.id, message.threadId, DeliveryState.Blocked);
+  }
+
   claim(message: RelayMessage): boolean
   {
     const result = this.database.prepare('INSERT OR IGNORE INTO outbound VALUES (?, ?, ?)')
@@ -259,6 +270,13 @@ export class DeliveryStore
   get blocked(): number
   {
     const row = this.database.prepare('SELECT COUNT(*) AS total FROM inbound WHERE state = ?')
+      .get(DeliveryState.Blocked);
+    return Number(row?.total);
+  }
+
+  get blockedOutbound(): number
+  {
+    const row = this.database.prepare('SELECT COUNT(*) AS total FROM outbound WHERE state = ?')
       .get(DeliveryState.Blocked);
     return Number(row?.total);
   }

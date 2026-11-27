@@ -90,7 +90,19 @@ export class Bridge
 
     const conversationID = this.store.findThread(message.threadId);
 
-    if (!conversationID || !await this.policy.permits(conversationID) || !this.store.claim(message))
+    if (!conversationID || this.store.hasOutbound(message.id))
+    {
+      return;
+    }
+
+    if (!await this.policy.permits(conversationID))
+    {
+      this.store.blockOutbound(message);
+      this.logger.info('/native/reply/blocked', { relay_message_id: message.id, relay_thread_id: message.threadId });
+      return;
+    }
+
+    if (!this.store.claim(message))
     {
       return;
     }

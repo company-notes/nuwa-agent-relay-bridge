@@ -4,12 +4,14 @@ Follow [CODE_PRINCIPLES.md](CODE_PRINCIPLES.md) in production and test code. Tes
 
 ## Essential scenarios
 
-1. An authorized employee submits a request and receives the AI assistant's delayed response in the original private chat.
-2. The employee quotes that response to continue the same Relay thread. Two separate requests remain independently correlated.
+1. Two first-time permitted LINE users chat normally and receive interleaved delayed answers in their original private chats.
+2. Ordinary follow-ups continue the same thread; quotes select the original thread, and an explicit new topic starts a separate thread.
 3. Duplicate inbound events and an interrupted Relay submission reuse the same persisted submission identifier.
 4. Restart preserves pending messages, conversation correlation, and confirmed deliveries. An interrupted native send retains an uncertain state for reconciliation.
 5. Unauthorized senders, self-generated messages, unknown quote targets, unexpected Relay senders, and unrelated threads cannot reach an unauthorized destination.
 6. A full bounded inbox window without a known checkpoint requires investigation; tests do not treat it as a complete history.
+7. Friend and allowlist policies restrict both submissions and delayed replies. Upgrades preserve the existing account and authorization.
+8. Textless stickers carry validated public artifact links; private media notices accurately describe the unavailable attachment payload. The HTTP contract test verifies the artifactLinks field.
 
 Run `npm install`, `npm run check`, and `npm test`. CI executes the same checks. For regressions, demonstrate a meaningful failing assertion before repair, run the same test after repair, then run the related and full suites. Perform the Rule 20 spacing review after logic passes and rerun validation.
 

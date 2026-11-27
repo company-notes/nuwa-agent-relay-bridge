@@ -44,7 +44,8 @@ test('a bridge request and continuation traverse the authenticated HTTP tool con
     'http://127.0.0.1:' + address.port + '/mcp');
   const sent = await client.send('example/may/main', 'Prepare report', 'submission-1');
   const inbox = await client.inbox();
-  await client.reply(sent.threadId, 'Add invoices', 'submission-2', inbox[0]!.id);
+  const sticker = 'https://stickershop.line-scdn.net/stickershop/v1/sticker/123/android/sticker.png';
+  await client.reply(sent.threadId, '[LINE sticker]', 'submission-2', inbox[0]!.id, [sticker]);
 
   assert.deepEqual(credentials, ['Bearer controlled-token', 'Bearer controlled-token', 'Bearer controlled-token']);
   assert.deepEqual(calls.map(call => call.method), ['tools/call', 'tools/call', 'tools/call']);
@@ -53,7 +54,8 @@ test('a bridge request and continuation traverse the authenticated HTTP tool con
     { name: 'sendToAgent', arguments: { to: 'example/may/main', message: 'Prepare report', submissionID: 'submission-1' } },
     { name: 'relayInbox', arguments: {} },
     { name: 'relayReplyThread', arguments: {
-      threadID: 'thread-1', body: 'Add invoices', submissionID: 'submission-2', messageID: 'incoming-1',
+      threadID: 'thread-1', body: '[LINE sticker]', submissionID: 'submission-2', messageID: 'incoming-1',
+      artifactLinks: [sticker],
     } },
   ]);
 });

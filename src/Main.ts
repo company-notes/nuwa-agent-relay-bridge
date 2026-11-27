@@ -200,6 +200,7 @@ class Application
       console.log('Access mode:', AccessMode[config.access.mode]);
       console.log('Pending inbound submissions:', store.pendingCount);
       console.log('Blocked inbound messages:', store.blocked);
+      console.log('Blocked outbound replies:', store.blockedOutbound);
       console.log('Uncertain native deliveries:', store.unresolved);
     }
     finally

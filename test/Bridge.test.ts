@@ -66,9 +66,11 @@ class ControlledMessaging implements MessagingBackend
   readonly deliveries: { conversation: string; body: string; id: string }[] = [];
   failAfterSend = false;
   readonly friends = new Set(['employee']);
+  friendChecks = 0;
 
   async isFriend(senderID: string): Promise<boolean>
   {
+    this.friendChecks++;
     return this.friends.has(senderID);
   }
 
@@ -309,6 +311,14 @@ test('friend access follows the company contact directory and revoked contacts r
   s.answer(s.relay.submissions[0]!.thread);
   await s.bridge.cycle();
 
+  assert.equal(s.messaging.deliveries.length, 0);
+  assert.equal(s.store.blockedOutbound, 1);
+
+  s.messaging.friends.add('employee');
+  const checks = s.messaging.friendChecks;
+  await s.bridge.cycle();
+
+  assert.equal(s.messaging.friendChecks, checks);
   assert.equal(s.messaging.deliveries.length, 0);
 });
 

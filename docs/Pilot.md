@@ -1,6 +1,6 @@
 # Linux pilot acceptance
 
-The pilot uses one company LINE account, one explicitly paired employee, and one existing Nuwa-enabled AI assistant. Run it in an isolated organization with a restricted assistant that has only the tools approved for that employee.
+The pilot uses one company LINE account and one existing Nuwa-enabled AI assistant. People send ordinary private messages through LINE under an administrator-selected access policy. Run the pilot in an isolated organization with a restricted assistant whose tools, data and memory are safe for all permitted senders.
 
 ## Installation
 
@@ -30,15 +30,22 @@ Run setup on the host where the service will run. For VPS setup, establish the p
 ssh -L 43183:127.0.0.1:43183 user@vps
 ```
 
-The setup command prints a Nuwa OAuth authorization URL and opens a loopback callback listener at port 43183. When operating a remote Linux host, establish an SSH local port forward for 43183 to the host before opening the authorization URL on the administrator's workstation. Complete authorization in the browser, select the assistant's exact canonical address, scan the QR code shown directly in the SSH terminal with the authorized company LINE account, confirm login and enter the temporary PIN in LINE when prompted, and follow the one-time employee pairing prompt. Treat the QR and PIN as credentials and keep them private. Once Nuwa OAuth finishes, the temporary callback port closes; an SSH forward may report connection refused for subsequent browser requests. LINE login uses a separate connection. The employee sends the generated text in a private LINE chat with the company account; the administrator confirms the pairing.
+The setup command prints a Nuwa OAuth authorization URL and opens a loopback callback listener at port 43183. When operating a remote Linux host, establish an SSH local port forward for 43183 to the host before opening the authorization URL on the administrator's workstation. Complete authorization in the browser, select the assistant's exact canonical address, scan the QR code shown directly in the SSH terminal with the authorized company LINE account, confirm login and enter the temporary PIN in LINE when prompted, and select Open, Friends, or Allowlist at the access policy prompt. Treat the QR and PIN as credentials and keep them private. Once Nuwa OAuth finishes, the temporary callback port closes; an SSH forward may report connection refused for subsequent browser requests. LINE login uses a separate connection.
 
 The default private data directory is `~/.config/nuwa-agent-relay-bridge`. The `NUWA_BRIDGE_HOME` environment variable selects a separate directory. The directory contains authorization material, LINE session state, configuration and the SQLite delivery database; protect and back it up as sensitive data. Start one process per directory. Stop a running process with SIGINT or SIGTERM. A stale lock after an abnormal termination requires administrator verification that the process has stopped before removal.
 
+## Access and upgrades
+
+Stop the existing bridge using Ctrl+C. Run the new executable with `status` to verify the existing database and check for unresolved work, then run it with `access` to choose the access policy. Preserve the private data directory and its account authorization. Upgrades from the single-user pilot retain its approved sender until the administrator selects a policy. Complete pending submissions on the old executable before migrating its database. Keep a private backup of the data directory while stopped. The new executable accepts ordinary messages; end users need no pairing code.
+
+Start the bridge after changing access. Open mode requires explicit confirmation; select Friends when the company account maintains its own friend list, or Allowlist to choose specific contacts. LINE's own privacy controls govern friend additions and blocking.
+
 ## Acceptance
 
-Use a fresh request for a new task. Quote the assistant's specific LINE response to continue its existing Relay thread. A new unquoted message creates a new thread. Check the assistant's native conversation and the actual LINE reply, including a response delayed beyond the initial request. Restart the bridge and repeat the continuation. Confirm an unpaired LINE account cannot trigger work.
+Send an ordinary question, receive its reply, and ask a follow-up without quoting. Verify the same Relay Thread. Have a second permitted person add the company account and chat normally. Interleave the two conversations and verify that the replies and AI context stay isolated. Send a LINE sticker and verify the corresponding Relay message and public image link. Send a private image and confirm its content-type notice. Use `/new <message>` for a distinct topic; quote an earlier AI reply to continue that specific thread. Restart and repeat the continuation. Verify that a sender excluded by Friends or Allowlist cannot trigger work, and that revoked access prevents a delayed reply. 
 
-`./nuwa-bridge-linux-arm64.run status` (or the x64 executable with the same command) reports the bridge address, designated assistant and uncertain native delivery count. Reconcile uncertain sends using actual native delivery evidence before taking recovery action.
+
+`./nuwa-bridge-linux-arm64.run status` (or the x64 executable with the same command) reports the bridge address, designated assistant, access mode and pending, blocked or uncertain delivery counts. Reconcile uncertain sends using actual native delivery evidence before taking recovery action.
 
 The Relay inbox exposes a bounded window of 100 messages. The pilot detects a saturated window without a retained checkpoint and requires reconciliation. Continuous event replay and recovery from arbitrary offline intervals require a durable paginated or Wake-based receive contract.
 
