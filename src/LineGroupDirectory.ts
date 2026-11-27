@@ -118,6 +118,7 @@ export class LineGroupDirectory
   async list(): Promise<LINEGroup[]>
   {
     const ids = await this.joinedIDs();
+
     const groups: LINEGroup[] = [];
 
     for (let offset = 0; offset < ids.length; offset += 50)

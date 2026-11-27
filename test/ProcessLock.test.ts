@@ -13,6 +13,7 @@ test('after a sudden process termination the next bridge can start with its exis
   const directory = mkdtempSync(join(tmpdir(), 'bridge-lock-'));
   const path = join(directory, 'bridge.lock');
   t.after(() => rmSync(directory, { recursive: true, force: true }));
+
   writeFileSync(path, '');
 
   const moduleURL = new URL('../src/ProcessLock.js', import.meta.url).href;
