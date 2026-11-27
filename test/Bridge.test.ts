@@ -218,3 +218,20 @@ test('bounded inbox with no known checkpoint fails visibly', async t =>
   assert.equal(s.store.checkpoint, undefined);
   assert.equal(s.messaging.deliveries.length, 0);
 });
+
+test('ordinary follow-up continues the same conversation without quoting', async t =>
+{
+  const s = new Scenario();
+  t.after(() => s.close());
+
+  s.request('first', 'What model are you?');
+  await s.bridge.cycle();
+  const thread = s.relay.submissions[0]!.thread;
+  s.answer(thread);
+  await s.bridge.cycle();
+  s.restart();
+
+  s.request('follow-up', 'Which version?');
+  await s.bridge.cycle();
+  assert.equal(s.relay.submissions[1]!.thread, thread);
+});
