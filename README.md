@@ -75,6 +75,12 @@ The first messaging backend is [LINEJS](https://github.com/evex-dev/linejs), a T
 
 Manage friend additions, blocking and incoming-message restrictions using LINE. Stop the bridge and run its `access` command to change the policy. The selected policy applies to both incoming requests and delayed replies. Use a designated assistant whose permitted tools, data and memory are safe for every allowed sender. A shared Bridge identity provides separate Relay conversation routes, not separate AI tool grants or isolated native AI context by itself.
 
+### Group conversations
+
+Add the company LINE account to a normal LINE group using LINE's native invitation and acceptance process. Stop the bridge and run `groups` to choose Disabled, Open, or Allowlist. The default is Disabled. Allowlist approves selected joined groups and their current members; a change in membership requires the administrator to review and approve the group again. Open permits all currently joined groups and requires explicit confirmation. Group access is independent of private chat access; approved group members may address the assistant even if they are not its private LINE friends.
+
+The assistant is activated by a genuine LINE mention of its account or a quote of its own previous reply. Ordinary group chatter and @Everyone do not trigger work. Each group maintains its own Relay conversation, separate from private chats and other groups. All replies return to the group, and group membership is verified before sending. Group members must be aware of the AI integration and its data handling; the designated assistant must have tools, data and native context appropriate for the entire group. Verify AI-platform context isolation before enabling real sensitive workflows.
+
 ### Example conversation
 
 1. An authorized employee asks the company LINE account, "Please check yesterday's orders and prepare a summary."
@@ -119,7 +125,7 @@ Use the published [Nuwa onboarding guide](https://mcp.agent-relay.company-notes.
 - Claim the delivery atomically, send the content to the authorized native conversation, and record the native submission evidence.
 - Preserve the relationship between the returned native message and Relay thread so the employee can continue the correct conversation.
 
-Each private conversation has its own current thread, and delayed replies retain their original routes across new topics. Cross-chat or unknown quoted-message IDs are blocked and recorded. Relay and native reply routing are isolated by conversation; the receiving AI platform must independently enforce its own conversation context and tool permissions.
+Each private or group conversation has its own current thread, and delayed replies retain their original routes across new topics. Cross-chat or unknown quoted-message IDs are blocked and recorded. Relay and native reply routing are isolated by conversation; the receiving AI platform must independently enforce its own conversation context and tool permissions.
 
 ### Security and delivery invariants
 

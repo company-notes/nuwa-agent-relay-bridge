@@ -1,23 +1,48 @@
 import type { TalkMessage } from '@evex-dev/linejs';
 
+import { ConversationAddress } from './ConversationAddress.js';
 import type { NativeMessage } from './Contracts.js';
 
 export class LineMessage
 {
   static normalize(message: TalkMessage, accountID: string): NativeMessage | undefined
   {
-    if (message.isMyMessage || message.to.type !== 'USER' || message.to.id !== accountID)
+    const isGroup = message.to.type === 'GROUP';
+    const isPrivate = message.to.type === 'USER' && message.to.id === accountID;
+
+    if (message.isMyMessage || (!isGroup && !isPrivate))
     {
       return undefined;
     }
 
     const senderID = message.from.id;
     const content = this.content(message);
+    const mentionsAccount = isGroup && this.mentionsAccount(message, accountID);
 
     return {
-      messageID: message.raw.id, senderID, conversationID: senderID, body: content.body,
+      messageID: message.raw.id, senderID,
+      conversationID: isGroup ? ConversationAddress.group(message.to.id) : senderID,
+      body: content.body, mentionsAccount,
       artifactLinks: content.artifactLinks, replyToID: message.getReplyTarget()?.id,
     };
+  }
+
+  private static mentionsAccount(message: TalkMessage, accountID: string): boolean
+  {
+    if (message.raw.contentType !== 'NONE')
+    {
+      return false;
+    }
+
+    try
+    {
+      return message.getMentions().some(mention => !mention.all && mention.mid === accountID);
+    }
+    catch
+    {
+      // Malformed mention metadata cannot activate a group message.
+      return false;
+    }
   }
 
   private static content(message: TalkMessage): { body: string; artifactLinks: string[] }

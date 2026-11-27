@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { Bridge } from '../src/Bridge.js';
+import { GroupMode, GroupPolicy, type GroupSettings } from '../src/GroupPolicy.js';
+import { ConversationAddress } from '../src/ConversationAddress.js';
 import { AccessMode, AccessPolicy, type AccessSettings } from '../src/AccessPolicy.js';
 import type { BridgeBinding, MessagingBackend, NativeMessage, RelayClient, RelayMessage, RelaySubmission } from '../src/Contracts.js';
 import { DeliveryStore } from '../src/DeliveryStore.js';
@@ -68,6 +70,12 @@ class ControlledMessaging implements MessagingBackend
   failAfterSend = false;
   readonly friends = new Set(['employee']);
   friendChecks = 0;
+  readonly groups = new Map<string, string[]>();
+
+  async groupMembers(groupID: string): Promise<string[] | undefined>
+  {
+    return this.groups.get(groupID);
+  }
 
   async isFriend(senderID: string): Promise<boolean>
   {
@@ -104,7 +112,8 @@ class Scenario
   store: DeliveryStore;
   bridge: Bridge;
 
-  constructor(settings: AccessSettings = { mode: AccessMode.Allowlist, allowed_user_ids: ['employee'] })
+  constructor(settings: AccessSettings = { mode: AccessMode.Allowlist, allowed_user_ids: ['employee'] },
+    private readonly groupSettings: GroupSettings = GroupPolicy.disabled)
   {
     this.settings = settings;
     this.store = this.open();
@@ -118,7 +127,8 @@ class Scenario
 
   private createBridge(): Bridge
   {
-    return new Bridge(Scenario.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging));
+    return new Bridge(Scenario.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
+      new GroupPolicy(this.groupSettings, this.messaging, Scenario.binding.accountID));
   }
 
   restart(): void
@@ -134,6 +144,14 @@ class Scenario
       messageID: id, senderID, conversationID: senderID, body, replyToID: quote, artifactLinks,
     };
     return this.bridge.receive(message);
+  }
+
+  groupRequest(id: string, groupID: string, senderID: string, body: string, mention = false, quote?: string): boolean
+  {
+    return this.bridge.receive({
+      messageID: id, conversationID: ConversationAddress.group(groupID), senderID,
+      body, mentionsAccount: mention, replyToID: quote,
+    });
   }
 
   answer(threadId: string, id = 'relay-answer', senderSessionID = 'assistant-session'): void
@@ -347,4 +365,102 @@ test('sticker link remains attached to the exact conversation and retries reuse 
   assert.equal(s.relay.submissions.length, 2);
   assert.equal(s.relay.submissions[1]!.thread, thread);
   assert.deepEqual(s.relay.submissions[1]!.artifactLinks, links);
+});
+
+test('company group members mention the assistant and quote its reply without mixing private chats or other groups', async t =>
+{
+  const members = ['company-line', 'employee', 'coworker'];
+  const s = new Scenario(undefined, {
+    mode: GroupMode.Allowlist,
+    approved_groups: [{ id: 'company', member_ids: members }, { id: 'project', member_ids: members }],
+  });
+  t.after(() => s.close());
+  s.messaging.groups.set('company', members);
+  s.messaging.groups.set('project', members);
+  s.messaging.groups.set('external', members);
+
+  assert.equal(s.groupRequest('ordinary', 'company', 'employee', 'Casual conversation'), false);
+  assert.equal(s.groupRequest('external', 'external', 'employee', '@AI secret?', true), false);
+  assert.equal(s.groupRequest('loop', 'company', 'company-line', '@AI own reply', true), false);
+
+  assert.equal(s.groupRequest('mention', 'company', 'coworker', '@AI report', true), true);
+  s.request('private', 'Private question');
+  s.groupRequest('project-1', 'project', 'employee', '@AI project status', true);
+  await s.bridge.cycle();
+
+  const company = s.relay.submissions[0]!.thread;
+  const privateThread = s.relay.submissions[1]!.thread;
+  const project = s.relay.submissions[2]!.thread;
+
+  assert.equal(new Set([company, privateThread, project]).size, 3);
+  assert.match(s.relay.submissions[0]!.body, /LINE group message; sender ID: coworker/);
+  s.restart();
+
+  s.answer(company, 'group-answer');
+  s.answer(privateThread, 'private-answer');
+  s.answer(project, 'project-answer');
+  await s.bridge.cycle();
+
+  assert.deepEqual(s.messaging.deliveries.map(item => item.conversation),
+    ['group:company', 'employee', 'group:project']);
+
+  assert.equal(s.groupRequest('foreign-quote', 'project', 'employee', 'Cross-group quote', false, 'line-1'), false);
+  assert.equal(s.groupRequest('own-quote', 'company', 'employee', 'Which version?', false, 'line-1'), true);
+  s.groupRequest('mention-again', 'project', 'employee', '@AI update', true);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[3]!.thread, company);
+  assert.equal(s.relay.submissions[3]!.replyTo, 'group-answer');
+  assert.equal(s.relay.submissions[4]!.thread, project);
+});
+
+test('group access remains disabled until configured and changed membership blocks delayed replies', async t =>
+{
+  const members = ['company-line', 'employee'];
+  const disabled = new Scenario();
+  t.after(() => disabled.close());
+  disabled.messaging.groups.set('company', members);
+
+  assert.equal(disabled.groupRequest('ignored', 'company', 'employee', '@AI hello', true), false);
+
+  const s = new Scenario(undefined, {
+    mode: GroupMode.Allowlist, approved_groups: [{ id: 'company', member_ids: members }],
+  });
+  t.after(() => s.close());
+  s.messaging.groups.set('company', members);
+  s.groupRequest('outsider', 'company', 'outsider', '@AI hello', true);
+  s.groupRequest('approved', 'company', 'employee', '@AI report', true);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 1);
+  assert.equal(s.store.blocked, 1);
+
+  s.messaging.groups.set('company', [...members, 'new-member']);
+  s.answer(s.relay.submissions[0]!.thread);
+  s.groupRequest('changed', 'company', 'employee', '@AI another report', true);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 1);
+  assert.equal(s.store.blocked, 2);
+  assert.equal(s.messaging.deliveries.length, 0);
+  assert.equal(s.store.blockedOutbound, 1);
+});
+
+test('explicitly open groups still require current membership and a direct mention', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+  s.messaging.groups.set('joined', ['company-line', 'employee']);
+  s.messaging.groups.set('left', ['employee']);
+
+  s.groupRequest('left', 'left', 'employee', '@AI hello', true);
+  s.groupRequest('joined', 'joined', 'employee', '@AI hello', true);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 1);
+  s.messaging.groups.delete('joined');
+  s.answer(s.relay.submissions[0]!.thread);
+  await s.bridge.cycle();
+
+  assert.equal(s.messaging.deliveries.length, 0);
 });

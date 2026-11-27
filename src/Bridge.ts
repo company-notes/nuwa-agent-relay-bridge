@@ -3,6 +3,8 @@ import type { BridgeBinding, MessagingBackend, NativeMessage, RelayClient, Relay
 import { DeliveryStore } from './DeliveryStore.js';
 import { AccessPolicy } from './AccessPolicy.js';
 import { ConversationRouter } from './ConversationRouter.js';
+import { ConversationAddress } from './ConversationAddress.js';
+import { GroupPolicy } from './GroupPolicy.js';
 import { Logger } from './Logger.js';
 
 export class Bridge
@@ -17,6 +19,7 @@ export class Bridge
     private readonly relay: RelayClient,
     private readonly backend: MessagingBackend,
     private readonly policy: AccessPolicy,
+    private readonly groupPolicy = new GroupPolicy(GroupPolicy.disabled, backend, binding.accountID),
   )
   {
     this.router = new ConversationRouter(store);
@@ -24,8 +27,33 @@ export class Bridge
 
   receive(message: NativeMessage): boolean
   {
-    if (message.senderID !== message.conversationID || message.senderID === this.binding.accountID ||
-        !this.policy.accepts(message.senderID))
+    if (!message.senderID || message.senderID === this.binding.accountID)
+    {
+      return false;
+    }
+
+    const groupID = ConversationAddress.groupID(message.conversationID);
+    if (groupID !== undefined)
+    {
+      if (!this.groupPolicy.accepts(groupID))
+      {
+        return false;
+      }
+
+      const quote = message.replyToID ? this.store.findQuote(message.replyToID, message.conversationID) : undefined;
+      const quotesAssistant = Boolean(quote?.replyMessageID);
+
+      if (!message.mentionsAccount && !quotesAssistant)
+      {
+        return false;
+      }
+
+      if (message.replyToID && !quote)
+      {
+        message = { ...message, replyToID: undefined };
+      }
+    }
+    else if (message.senderID !== message.conversationID || !this.policy.accepts(message.senderID))
     {
       return false;
     }
@@ -43,11 +71,20 @@ export class Bridge
     return true;
   }
 
+  private async permits(conversationID: string, senderID?: string): Promise<boolean>
+  {
+    const groupID = ConversationAddress.groupID(conversationID);
+
+    return groupID === undefined
+      ? this.policy.permits(senderID ?? conversationID)
+      : this.groupPolicy.permits(groupID, senderID);
+  }
+
   private async submitPending(): Promise<void>
   {
     for (const message of this.store.pending())
     {
-      if (!await this.policy.permits(message.senderID))
+      if (!await this.permits(message.conversationID, message.senderID))
       {
         this.store.block(message.messageID);
         this.logger.info('/native/message/blocked', { native_message_id: message.messageID });
@@ -96,7 +133,7 @@ export class Bridge
       return;
     }
 
-    if (!await this.policy.permits(conversationID))
+    if (!await this.permits(conversationID))
     {
       this.store.blockOutbound(message);
       this.logger.info('/native/reply/blocked', { relay_message_id: message.id, relay_thread_id: message.threadId });

@@ -7,6 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { Bridge } from './Bridge.js';
 import { AccessMode, AccessPolicy } from './AccessPolicy.js';
+import { GroupMode, GroupPolicy } from './GroupPolicy.js';
+import { GroupSetup } from './GroupSetup.js';
 import { AccessSetup } from './AccessSetup.js';
 import { BridgeConfiguration } from './BridgeConfiguration.js';
 import { DeliveryStore } from './DeliveryStore.js';
@@ -74,6 +76,7 @@ class Application
         this.config.write({
           session_id: identity.sessionID, canonical: identity.canonical, account_id: line.accountID,
           recipient_session_id: recipient.id, recipient_address: recipient.canonical, access,
+          groups: GroupPolicy.disabled,
         });
         this.printStart();
       }
@@ -119,6 +122,31 @@ class Application
     }
   }
 
+  private async configureGroups(): Promise<void>
+  {
+    const config = this.config.read();
+    const line = await LineBackend.connect(this.storage, false);
+    const input = createInterface({ input: process.stdin, output: process.stdout });
+
+    try
+    {
+      if (line.accountID !== config.account_id)
+      {
+        throw new BridgeError('LINE account differs from its configured identity.');
+      }
+
+      console.log('Current group mode:', GroupMode[(config.groups ?? GroupPolicy.disabled).mode]);
+      config.groups = await new GroupSetup(input, () => line.listGroups()).select();
+      this.config.write(config);
+      this.printStart();
+    }
+    finally
+    {
+      input.close();
+      line.stop();
+    }
+  }
+
   private async start(): Promise<void>
   {
     const config = this.config.read();
@@ -142,7 +170,8 @@ class Application
       }
 
       const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), binding);
-      const bridge = new Bridge(binding, store, this.relay, line, new AccessPolicy(config.access, line));
+      const bridge = new Bridge(binding, store, this.relay, line, new AccessPolicy(config.access, line),
+        new GroupPolicy(config.groups ?? GroupPolicy.disabled, line, binding.accountID));
 
       let stopped = false;
       const stop = () => { stopped = true; line.stop(); };
@@ -198,6 +227,7 @@ class Application
       console.log('Bridge address:', config.canonical);
       console.log('Designated assistant:', config.recipient_address);
       console.log('Access mode:', AccessMode[config.access.mode]);
+      console.log('Group mode:', GroupMode[(config.groups ?? GroupPolicy.disabled).mode]);
       console.log('Pending inbound submissions:', store.pendingCount);
       console.log('Blocked inbound messages:', store.blocked);
       console.log('Blocked outbound replies:', store.blockedOutbound);
@@ -220,7 +250,7 @@ class Application
 
     if (!command || command === '--help' || command === 'help')
     {
-      console.log('Usage: nuwa-bridge <setup | access | start | status | --version>');
+      console.log('Usage: nuwa-bridge <setup | access | groups | start | status | --version>');
       return;
     }
 
@@ -232,9 +262,9 @@ class Application
       return;
     }
 
-    if (command !== 'setup' && command !== 'access' && command !== 'start')
+    if (command !== 'setup' && command !== 'access' && command !== 'groups' && command !== 'start')
     {
-      throw new BridgeError('Use setup, access, start, or status.');
+      throw new BridgeError('Use setup, access, groups, start, or status.');
     }
 
     const lockPath = join(this.directory, 'bridge.lock');
@@ -249,6 +279,10 @@ class Application
       else if (command === 'access')
       {
         await this.configureAccess();
+      }
+      else if (command === 'groups')
+      {
+        await this.configureGroups();
       }
       else
       {

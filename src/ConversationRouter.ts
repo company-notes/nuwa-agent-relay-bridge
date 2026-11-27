@@ -1,3 +1,4 @@
+import { ConversationAddress } from './ConversationAddress.js';
 import type { InboundRecord, SubmissionPlan } from './DeliveryStore.js';
 import { DeliveryStore } from './DeliveryStore.js';
 
@@ -24,9 +25,13 @@ export class ConversationRouter
       return undefined;
     }
 
+    const text = newTopic ? message.body.replace(/^\/new\s+/i, '') : message.body;
+    const groupID = ConversationAddress.groupID(message.conversationID);
+    const body = groupID === undefined ? text : '[LINE group message; sender ID: ' + message.senderID + ']\n' + text;
+
     const plan = {
       threadID: route?.threadID ?? null, replyMessageID: route?.replyMessageID ?? null,
-      body: newTopic ? message.body.replace(/^\/new\s+/i, '') : message.body,
+      body,
       artifactLinks: message.artifactLinks ?? [],
     };
 

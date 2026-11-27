@@ -45,4 +45,16 @@ test('a real group mention retains its group destination instead of becoming a p
   const message = LineMessage.normalize(event, 'u-company');
 
   assert.equal(message?.conversationID, 'group:c-company');
+  assert.equal(message?.mentionsAccount, true);
+});
+
+test('a mention of everyone or another person does not activate the company assistant', () =>
+{
+  const event = {
+    isMyMessage: false, from: { id: 'u-employee' }, to: { type: 'GROUP', id: 'c-company' },
+    raw: { id: 'group-message', contentType: 'NONE' }, text: '@Everyone hello',
+    getReplyTarget: () => null, getMentions: () => [{ all: true }, { all: false, mid: 'u-other' }],
+  } as unknown as TalkMessage;
+
+  assert.equal(LineMessage.normalize(event, 'u-company')?.mentionsAccount, false);
 });
