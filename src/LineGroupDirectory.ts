@@ -24,21 +24,18 @@ export class LineGroupDirectory
       return undefined;
     }
 
-    // LINE's Chat type uses enum GROUP = 0. A missing default discriminator
-    // is accepted only with a group MID and explicit group roster.
-    const type: unknown = chat.type;
-    const isGroup = type === 'GROUP' || ((type === 0 || type === undefined) && chat.chatMid.startsWith('c'));
+    const type = this.chatType(chat.type);
     const members: unknown = chat.extra?.groupExtra?.memberMids;
 
-    if (!isGroup)
+    if (!chat.chatMid.startsWith('c'))
     {
-      this.logger.info('/group/roster/rejected', { reason: 'not_group' });
+      this.logger.info('/group/roster/rejected', { reason: 'not_group_mid', chat_type: type });
       return undefined;
     }
 
     if (!members || typeof members !== 'object' || Array.isArray(members))
     {
-      this.logger.info('/group/roster/rejected', { reason: 'missing_member_map' });
+      this.logger.info('/group/roster/rejected', { reason: 'missing_member_map', chat_type: type });
       return undefined;
     }
 
@@ -58,38 +55,69 @@ export class LineGroupDirectory
       return undefined;
     }
 
+    this.logger.info('/group/roster/verified', { chat_type: type, member_count: memberIDs.length });
+
     return {
       id: chat.chatMid, name: (chat.chatName || chat.chatMid).replace(/[\p{Cc}\p{Cf}]/gu, ''),
       memberIDs,
     };
   }
 
-  async members(groupID: string): Promise<string[] | undefined>
+  private chatType(type: unknown): string
   {
-    const chat = await this.base.talk.getChat({ chatMid: groupID, withMembers: true, withInvitees: true });
-    const group = this.parse(chat);
-
-    if (group && group.id !== groupID)
+    if (type === undefined || type === null)
     {
-      this.logger.info('/group/roster/rejected', { reason: 'chat_id_mismatch' });
-      return undefined;
+      return 'absent';
     }
 
-    return group?.memberIDs;
+    if (type === 'GROUP' || type === 'ROOM' || type === 'PEER' || type === 0 || type === 1 || type === 2 ||
+        type === '0' || type === '1' || type === '2')
+    {
+      return String(type);
+    }
+
+    return 'other_' + typeof type;
   }
 
-  async list(): Promise<LINEGroup[]>
+  private async joinedIDs(): Promise<string[]>
   {
     const joined = await this.base.talk.getAllChatMids({
       request: { withMemberChats: true, withInvitedChats: false }, syncReason: 'INTERNAL',
     });
-    const ids = joined?.memberChatMids;
+    const ids = joined?.memberChatMids ?? [];
 
     if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string'))
     {
       throw new BridgeError('LINE joined group directory returned an invalid response.');
     }
 
+    return ids.filter(id => id.startsWith('c'));
+  }
+
+  async members(groupID: string): Promise<string[] | undefined>
+  {
+    const joined = await this.joinedIDs();
+
+    if (!joined.includes(groupID))
+    {
+      this.logger.info('/group/roster/rejected', { reason: 'not_joined_group' });
+      return undefined;
+    }
+
+    const chat = await this.base.talk.getChat({ chatMid: groupID, withMembers: true, withInvitees: true });
+
+    if (chat?.chatMid !== groupID)
+    {
+      this.logger.info('/group/roster/rejected', { reason: chat ? 'chat_id_mismatch' : 'missing_chat' });
+      return undefined;
+    }
+
+    return this.parse(chat)?.memberIDs;
+  }
+
+  async list(): Promise<LINEGroup[]>
+  {
+    const ids = await this.joinedIDs();
     const groups: LINEGroup[] = [];
 
     for (let offset = 0; offset < ids.length; offset += 50)
@@ -105,9 +133,14 @@ export class LineGroupDirectory
 
       for (const chat of result.chats)
       {
+        if (!ids.includes(chat?.chatMid))
+        {
+          continue;
+        }
+
         const group = this.parse(chat);
 
-        if (group && ids.includes(group.id))
+        if (group)
         {
           groups.push(group);
         }

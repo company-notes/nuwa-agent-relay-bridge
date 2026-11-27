@@ -1,5 +1,5 @@
 import { BridgeError } from './BridgeError.js';
-import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface, type Interface } from 'node:readline/promises';
@@ -17,6 +17,7 @@ import { LineStorage } from './LineStorage.js';
 import { Logger } from './Logger.js';
 import { OAuthCredentials } from './OAuthCredentials.js';
 import { PrivateJSON } from './PrivateJSON.js';
+import { ProcessLock } from './ProcessLock.js';
 import { RemoteRelayClient } from './RemoteRelayClient.js';
 
 class Application
@@ -260,7 +261,7 @@ class Application
     }
 
     const lockPath = join(this.directory, 'bridge.lock');
-    const lock = openSync(lockPath, 'wx', 0o600);
+    const lock = ProcessLock.acquire(lockPath);
 
     try
     {
@@ -283,8 +284,7 @@ class Application
     }
     finally
     {
-      closeSync(lock);
-      unlinkSync(lockPath);
+      lock.close();
     }
   }
 }

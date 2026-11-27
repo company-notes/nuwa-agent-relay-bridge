@@ -4,7 +4,7 @@ The pilot uses one company LINE account and one existing Nuwa-enabled AI assista
 
 ## Installation
 
-Download the Linux executable matching the host architecture from [GitHub Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases). It includes the Node.js runtime, compiled application, and runtime dependencies. The target is a 64-bit Linux host with glibc 2.28 or later, Linux kernel 4.18 or later, and a standard POSIX shell, tar and gzip. Use a directory with enough temporary disk space to unpack the runtime.
+Download the Linux executable matching the host architecture from [GitHub Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases). It includes the Node.js runtime, compiled application, and runtime dependencies. The target is a 64-bit Linux host with glibc 2.28 or later, Linux kernel 4.18 or later, and a standard POSIX shell, tar, gzip and util-linux flock. Use a directory with enough temporary disk space to unpack the runtime.
 
 Check the host with `uname -m`, `uname -r`, and `getconf GNU_LIBC_VERSION`. Select the asset based on the machine architecture:
 
@@ -32,7 +32,7 @@ ssh -L 43183:127.0.0.1:43183 user@vps
 
 The setup command prints a Nuwa OAuth authorization URL and opens a loopback callback listener at port 43183. When operating a remote Linux host, establish an SSH local port forward for 43183 to the host before opening the authorization URL on the administrator's workstation. Complete authorization in the browser, select the assistant's exact canonical address, scan the QR code shown directly in the SSH terminal with the authorized company LINE account, confirm login and enter the temporary PIN in LINE when prompted, and select Open, Friends, or Allowlist at the access policy prompt. Treat the QR and PIN as credentials and keep them private. Once Nuwa OAuth finishes, the temporary callback port closes; an SSH forward may report connection refused for subsequent browser requests. LINE login uses a separate connection.
 
-The default private data directory is `~/.config/nuwa-agent-relay-bridge`. The `NUWA_BRIDGE_HOME` environment variable selects a separate directory. The directory contains authorization material, LINE session state, configuration and the SQLite delivery database; protect and back it up as sensitive data. Start one process per directory. Stop a running process with SIGINT or SIGTERM. A stale lock after an abnormal termination requires administrator verification that the process has stopped before removal.
+The default private data directory is `~/.config/nuwa-agent-relay-bridge`. The `NUWA_BRIDGE_HOME` environment variable selects a separate directory. The directory contains authorization material, LINE session state, configuration and the SQLite delivery database; protect and back it up as sensitive data. Start one process per directory. Stop a running process with SIGINT or SIGTERM. The operating system releases the process lock on normal exit, crash or reboot. The lock file remains on disk to preserve its inode; keep it in place while using the current executable. Stop any earlier bridge version before upgrading.
 
 ## Access and upgrades
 
@@ -46,7 +46,7 @@ Join the company LINE account to the desired internal group using the LINE app. 
 
 In the group, use LINE's native @Mention to select the company account and ask a question. Quote the assistant's reply to continue without another mention. Normal group chatter and @Everyone stay local. The bridge forwards only addressed messages and replies in the original group. Keep group participants informed and verify that the assistant's native context and tool permissions are suitable for the group.
 
-Group roster diagnostics distinguish unavailable chat data, unsupported chat type, missing member map, missing account or sender, and changed approved roster. The logs report a reason and member count when available, without listing member identifiers or message content. Open group access still requires a verified current roster.
+Group membership is verified using the authenticated joined-group directory, matching group MID, explicit member map and account membership. Roster diagnostics include the safe chat-type representation and member count where available. The logs report a reason and member count when available, without listing member identifiers or message content. Open group access still requires a verified current roster.
 
 ## Acceptance
 
