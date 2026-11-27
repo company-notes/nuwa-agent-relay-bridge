@@ -88,3 +88,23 @@ test('group roster reads request the complete member and invitee response and re
   chat.extra.groupExtra.memberMids.delete('bot');
   assert.equal(await directory.members('c-company'), undefined);
 });
+
+test('a joined group with contradictory chat type still uses its group ID and explicit roster', async () =>
+{
+  const chat = {
+    type: 'PEER', chatMid: 'c-company', chatName: 'Company',
+    extra: { groupExtra: { memberMids: { bot: 1, employee: 2 } } },
+  };
+  const base = {
+    profile: { mid: 'bot' },
+    talk: {
+      getAllChatMids: async () => ({ memberChatMids: ['c-company'] }),
+      getChats: async () => ({ chats: [chat] }),
+      getChat: async () => chat,
+    },
+  } as unknown as BaseClient;
+  const directory = new LineGroupDirectory(base);
+
+  assert.deepEqual(await directory.members('c-company'), ['bot', 'employee']);
+  assert.deepEqual((await directory.list()).map(group => group.id), ['c-company']);
+});
