@@ -1,4 +1,5 @@
 import { AccessMode, AccessPolicy, type AccessSettings } from './AccessPolicy.js';
+import { GroupPolicy, type GroupSettings } from './GroupPolicy.js';
 import { BridgeError } from './BridgeError.js';
 import type { BridgeBinding } from './Contracts.js';
 import { PrivateJSON } from './PrivateJSON.js';
@@ -11,6 +12,7 @@ export interface BridgeConfig
   recipient_session_id: string;
   recipient_address: string;
   access: AccessSettings;
+  groups?: GroupSettings;
 }
 
 export class BridgeConfiguration
@@ -34,11 +36,13 @@ export class BridgeConfiguration
     };
     const config: BridgeConfig = {
       session_id: saved.session_id, canonical: saved.canonical, account_id: saved.account_id,
-      recipient_session_id: saved.recipient_session_id, recipient_address: saved.recipient_address, access,
+      recipient_session_id: saved.recipient_session_id, recipient_address: saved.recipient_address,
+      access, groups: saved.groups ?? GroupPolicy.disabled,
     };
 
     this.binding(config);
     AccessPolicy.validate(config.access);
+    GroupPolicy.validate(config.groups ?? GroupPolicy.disabled);
 
     return config;
   }
@@ -47,6 +51,7 @@ export class BridgeConfiguration
   {
     this.binding(config);
     AccessPolicy.validate(config.access);
+    GroupPolicy.validate(config.groups ?? GroupPolicy.disabled);
     this.file.write(config);
   }
 

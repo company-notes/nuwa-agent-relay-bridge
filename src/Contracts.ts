@@ -5,6 +5,7 @@ export interface NativeMessage
   senderID: string;
   body: string;
   replyToID?: string;
+  mentionsAccount?: boolean;
   artifactLinks?: string[];
 }
 
@@ -44,4 +45,5 @@ export interface MessagingBackend
 {
   send(conversationID: string, body: string): Promise<string>;
   isFriend(senderID: string): Promise<boolean>;
+  groupMembers(groupID: string): Promise<string[] | undefined>;
 }

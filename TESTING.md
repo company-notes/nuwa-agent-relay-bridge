@@ -13,6 +13,9 @@ Follow [CODE_PRINCIPLES.md](CODE_PRINCIPLES.md) in production and test code. Tes
 7. Friend and allowlist policies restrict both submissions and delayed replies. Upgrades preserve the existing account and authorization.
 8. Textless stickers carry validated public artifact links; private media notices accurately describe the unavailable attachment payload. The HTTP contract test verifies the artifactLinks field.
 
+9. Group access defaults to disabled. A permitted group member mentions the assistant, receives a reply in the same group and quotes it after restart; ordinary chatter, @Everyone, self messages, cross-group quotes and unapproved groups do not trigger work. Private and group routes remain distinct.
+10. A changed approved roster or lost membership blocks submissions and delayed replies. Open group access requires current membership. A changed audience begins a new Relay Thread and delayed replies from the old audience remain blocked even after the new audience is permitted. Verify the real LINE group directory, mentions, quote events, native group send and AI context isolation before production use.
+
 Run `npm install`, `npm run check`, and `npm test`. CI executes the same checks. For regressions, demonstrate a meaningful failing assertion before repair, run the same test after repair, then run the related and full suites. Perform the Rule 20 spacing review after logic passes and rerun validation.
 
 The core tests use controlled external services; they do not establish live LINE login, Nuwa OAuth, or AI platform delivery. Verify those boundaries through a real two-way conversation before production deployment. A clearly labeled pilot release enables real-account acceptance. CI builds and launches both Linux x64 and ARM64 standalone executables on native runners from a separate working directory without a Node.js installation on PATH, checks its version/help output, and verifies that an unconfigured status command fails safely.

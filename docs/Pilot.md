@@ -40,6 +40,12 @@ Stop the existing bridge using Ctrl+C. Run the new executable with `status` to v
 
 Start the bridge after changing access. Open mode requires explicit confirmation; select Friends when the company account maintains its own friend list, or Allowlist to choose specific contacts. LINE's own privacy controls govern friend additions and blocking.
 
+## Group access
+
+Join the company LINE account to the desired internal group using the LINE app. Stop the bridge and run the executable with `groups`. Choose 3 (Allowlist), select the joined group by number, and restart. The private access policy remains unchanged. Group membership changes require running `groups` again to approve the new membership. The changed audience starts a new Relay conversation; replies to earlier audiences remain blocked. All group members can address the assistant regardless of private friend status.
+
+In the group, use LINE's native @Mention to select the company account and ask a question. Quote the assistant's reply to continue without another mention. Normal group chatter and @Everyone stay local. The bridge forwards only addressed messages and replies in the original group. Keep group participants informed and verify that the assistant's native context and tool permissions are suitable for the group.
+
 ## Acceptance
 
 Send an ordinary question, receive its reply, and ask a follow-up without quoting. Verify the same Relay Thread. Have a second permitted person add the company account and chat normally. Interleave the two conversations and verify that the replies and AI context stay isolated. Send a LINE sticker and verify the corresponding Relay message and public image link. Send a private image and confirm its content-type notice. Use `/new <message>` for a distinct topic; quote an earlier AI reply to continue that specific thread. Restart and repeat the continuation. Verify that a sender excluded by Friends or Allowlist cannot trigger work, and that revoked access prevents a delayed reply. 

@@ -3,6 +3,8 @@ import { Client } from '@evex-dev/linejs';
 import { BaseClient } from '@evex-dev/linejs/base';
 
 import type { MessagingBackend, NativeMessage } from './Contracts.js';
+import { ConversationAddress } from './ConversationAddress.js';
+import { LineGroupDirectory, type LINEGroup } from './LineGroupDirectory.js';
 import { LineStorage } from './LineStorage.js';
 import { LineContactDirectory, type LINEFriend } from './LineContactDirectory.js';
 import { LineMessage } from './LineMessage.js';
@@ -16,10 +18,12 @@ export class LineBackend implements MessagingBackend
   private readonly controller = new AbortController();
 
   private readonly contacts: LineContactDirectory;
+  private readonly groups: LineGroupDirectory;
 
   private constructor(private readonly client: Client, readonly accountID: string, private readonly checkSession: () => void)
   {
     this.contacts = new LineContactDirectory(client.base);
+    this.groups = new LineGroupDirectory(client.base);
   }
 
   static async connect(storage: LineStorage, interactive: boolean): Promise<LineBackend>
@@ -98,6 +102,18 @@ export class LineBackend implements MessagingBackend
     return this.contacts.isFriend(senderID);
   }
 
+  async listGroups(): Promise<LINEGroup[]>
+  {
+    this.assertHealthy();
+    return this.groups.list();
+  }
+
+  async groupMembers(groupID: string): Promise<string[] | undefined>
+  {
+    this.assertHealthy();
+    return this.groups.members(groupID);
+  }
+
   listen(receive: (message: NativeMessage) => void, onError: (error: unknown) => void): void
   {
     this.client.on('message', message =>
@@ -123,7 +139,7 @@ export class LineBackend implements MessagingBackend
   {
     this.assertHealthy();
 
-    const message = await this.client.base.talk.sendMessage({ to: conversationID, text: body, e2ee: true });
+    const message = await this.client.base.talk.sendMessage({ to: ConversationAddress.nativeID(conversationID), text: body, e2ee: true });
 
     return message.id;
   }

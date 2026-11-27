@@ -2,13 +2,15 @@ import { BridgeError } from './BridgeError.js';
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createInterface } from 'node:readline/promises';
+import { createInterface, type Interface } from 'node:readline/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { Bridge } from './Bridge.js';
 import { AccessMode, AccessPolicy } from './AccessPolicy.js';
+import { GroupMode, GroupPolicy } from './GroupPolicy.js';
+import { GroupSetup } from './GroupSetup.js';
 import { AccessSetup } from './AccessSetup.js';
-import { BridgeConfiguration } from './BridgeConfiguration.js';
+import { BridgeConfiguration, type BridgeConfig } from './BridgeConfiguration.js';
 import { DeliveryStore } from './DeliveryStore.js';
 import { LineBackend } from './LineBackend.js';
 import { LineStorage } from './LineStorage.js';
@@ -74,6 +76,7 @@ class Application
         this.config.write({
           session_id: identity.sessionID, canonical: identity.canonical, account_id: line.accountID,
           recipient_session_id: recipient.id, recipient_address: recipient.canonical, access,
+          groups: GroupPolicy.disabled,
         });
         this.printStart();
       }
@@ -96,6 +99,24 @@ class Application
 
   private async configureAccess(): Promise<void>
   {
+    await this.configurePolicy(async (config, line, input) =>
+    {
+      console.log('Current access mode:', AccessMode[config.access.mode]);
+      config.access = await new AccessSetup(input, () => line.listFriends()).select();
+    });
+  }
+
+  private async configureGroups(): Promise<void>
+  {
+    await this.configurePolicy(async (config, line, input) =>
+    {
+      console.log('Current group mode:', GroupMode[(config.groups ?? GroupPolicy.disabled).mode]);
+      config.groups = await new GroupSetup(input, () => line.listGroups()).select();
+    });
+  }
+
+  private async configurePolicy(update: (config: BridgeConfig, line: LineBackend, input: Interface) => Promise<void>): Promise<void>
+  {
     const config = this.config.read();
     const line = await LineBackend.connect(this.storage, false);
     const input = createInterface({ input: process.stdin, output: process.stdout });
@@ -107,8 +128,7 @@ class Application
         throw new BridgeError('LINE account differs from its configured identity.');
       }
 
-      console.log('Current access mode:', AccessMode[config.access.mode]);
-      config.access = await new AccessSetup(input, () => line.listFriends()).select();
+      await update(config, line, input);
       this.config.write(config);
       this.printStart();
     }
@@ -142,7 +162,8 @@ class Application
       }
 
       const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), binding);
-      const bridge = new Bridge(binding, store, this.relay, line, new AccessPolicy(config.access, line));
+      const bridge = new Bridge(binding, store, this.relay, line, new AccessPolicy(config.access, line),
+        new GroupPolicy(config.groups ?? GroupPolicy.disabled, line, binding.accountID));
 
       let stopped = false;
       const stop = () => { stopped = true; line.stop(); };
@@ -198,6 +219,7 @@ class Application
       console.log('Bridge address:', config.canonical);
       console.log('Designated assistant:', config.recipient_address);
       console.log('Access mode:', AccessMode[config.access.mode]);
+      console.log('Group mode:', GroupMode[(config.groups ?? GroupPolicy.disabled).mode]);
       console.log('Pending inbound submissions:', store.pendingCount);
       console.log('Blocked inbound messages:', store.blocked);
       console.log('Blocked outbound replies:', store.blockedOutbound);
@@ -220,7 +242,7 @@ class Application
 
     if (!command || command === '--help' || command === 'help')
     {
-      console.log('Usage: nuwa-bridge <setup | access | start | status | --version>');
+      console.log('Usage: nuwa-bridge <setup | access | groups | start | status | --version>');
       return;
     }
 
@@ -232,9 +254,9 @@ class Application
       return;
     }
 
-    if (command !== 'setup' && command !== 'access' && command !== 'start')
+    if (command !== 'setup' && command !== 'access' && command !== 'groups' && command !== 'start')
     {
-      throw new BridgeError('Use setup, access, start, or status.');
+      throw new BridgeError('Use setup, access, groups, start, or status.');
     }
 
     const lockPath = join(this.directory, 'bridge.lock');
@@ -249,6 +271,10 @@ class Application
       else if (command === 'access')
       {
         await this.configureAccess();
+      }
+      else if (command === 'groups')
+      {
+        await this.configureGroups();
       }
       else
       {

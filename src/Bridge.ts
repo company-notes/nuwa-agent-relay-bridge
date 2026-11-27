@@ -3,6 +3,8 @@ import type { BridgeBinding, MessagingBackend, NativeMessage, RelayClient, Relay
 import { DeliveryStore } from './DeliveryStore.js';
 import { AccessPolicy } from './AccessPolicy.js';
 import { ConversationRouter } from './ConversationRouter.js';
+import { ConversationAddress } from './ConversationAddress.js';
+import { GroupPolicy } from './GroupPolicy.js';
 import { Logger } from './Logger.js';
 
 export class Bridge
@@ -17,6 +19,7 @@ export class Bridge
     private readonly relay: RelayClient,
     private readonly backend: MessagingBackend,
     private readonly policy: AccessPolicy,
+    private readonly groupPolicy = new GroupPolicy(GroupPolicy.disabled, backend, binding.accountID),
   )
   {
     this.router = new ConversationRouter(store);
@@ -24,8 +27,34 @@ export class Bridge
 
   receive(message: NativeMessage): boolean
   {
-    if (message.senderID !== message.conversationID || message.senderID === this.binding.accountID ||
-        !this.policy.accepts(message.senderID))
+    if (!message.senderID || message.senderID === this.binding.accountID)
+    {
+      return false;
+    }
+
+    const groupID = ConversationAddress.groupID(message.conversationID);
+
+    if (groupID !== undefined)
+    {
+      if (!this.groupPolicy.accepts(groupID))
+      {
+        return false;
+      }
+
+      const quote = message.replyToID ? this.store.findQuote(message.replyToID, message.conversationID) : undefined;
+      const quotesAssistant = Boolean(quote?.replyMessageID);
+
+      if (!message.mentionsAccount && !quotesAssistant)
+      {
+        return false;
+      }
+
+      if (message.replyToID && !quote)
+      {
+        message = { ...message, replyToID: undefined };
+      }
+    }
+    else if (message.senderID !== message.conversationID || !this.policy.accepts(message.senderID))
     {
       return false;
     }
@@ -47,14 +76,18 @@ export class Bridge
   {
     for (const message of this.store.pending())
     {
-      if (!await this.policy.permits(message.senderID))
+      const groupID = ConversationAddress.groupID(message.conversationID);
+      const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID, message.senderID);
+      const permitted = groupID === undefined ? await this.policy.permits(message.senderID) : audience !== undefined;
+
+      if (!permitted)
       {
         this.store.block(message.messageID);
         this.logger.info('/native/message/blocked', { native_message_id: message.messageID });
         continue;
       }
 
-      const plan = this.router.plan(message);
+      const plan = this.router.plan(message, audience);
 
       if (!plan)
       {
@@ -73,7 +106,7 @@ export class Bridge
         throw new BridgeError('Invalid Relay submission correlation.');
       }
 
-      this.store.recordSubmission(message, result);
+      this.store.recordSubmission(message, result, plan.audience);
       this.logger.info('/relay/message/submitted', {
         native_message_id: message.messageID, relay_message_id: result.messageId, relay_thread_id: result.threadId,
       });
@@ -96,7 +129,13 @@ export class Bridge
       return;
     }
 
-    if (!await this.policy.permits(conversationID))
+    const groupID = ConversationAddress.groupID(conversationID);
+    const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID);
+    const permitted = groupID === undefined
+      ? await this.policy.permits(conversationID)
+      : audience !== undefined && audience === this.store.threadAudience(message.threadId);
+
+    if (!permitted)
     {
       this.store.blockOutbound(message);
       this.logger.info('/native/reply/blocked', { relay_message_id: message.id, relay_thread_id: message.threadId });

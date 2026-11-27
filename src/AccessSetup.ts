@@ -2,6 +2,7 @@ import type { Interface } from 'node:readline/promises';
 
 import { AccessMode, type AccessSettings } from './AccessPolicy.js';
 import { BridgeError } from './BridgeError.js';
+import { Selection } from './Selection.js';
 import type { LINEFriend } from './LineContactDirectory.js';
 
 export class AccessSetup
@@ -42,14 +43,8 @@ export class AccessSetup
 
     const friends = await this.contacts();
     friends.forEach((friend, index) => console.log(`${index + 1}. ${friend.name} (${friend.id})`));
-    const selection = (await this.input.question('Allowed contact numbers, separated by commas (empty denies all): ')).trim();
-    const numbers = selection ? selection.split(',').map(value => Number(value.trim())) : [];
+    const selected = await Selection.choose(this.input, friends, 'Allowed contact numbers, separated by commas (empty denies all): ');
 
-    if (numbers.some(value => !Number.isInteger(value) || value < 1 || value > friends.length))
-    {
-      throw new BridgeError('Invalid contact selection.');
-    }
-
-    return { mode: AccessMode.Allowlist, allowed_user_ids: [...new Set(numbers.map(value => friends[value - 1]!.id))] };
+    return { mode: AccessMode.Allowlist, allowed_user_ids: selected.map(friend => friend.id) };
   }
 }
