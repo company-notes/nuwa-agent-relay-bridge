@@ -42,7 +42,7 @@ Start the bridge after changing access. Open mode requires explicit confirmation
 
 ## Group access
 
-Join the company LINE account to the desired internal group using the LINE app. Stop the bridge and run the executable with `groups`. Choose 3 (Allowlist), select the joined group by number, and restart. The private access policy remains unchanged. Group membership changes require running `groups` again to approve the new membership. All group members can address the assistant regardless of private friend status.
+Join the company LINE account to the desired internal group using the LINE app. Stop the bridge and run the executable with `groups`. Choose 3 (Allowlist), select the joined group by number, and restart. The private access policy remains unchanged. Group membership changes require running `groups` again to approve the new membership. The changed audience starts a new Relay conversation; replies to earlier audiences remain blocked. All group members can address the assistant regardless of private friend status.
 
 In the group, use LINE's native @Mention to select the company account and ask a question. Quote the assistant's reply to continue without another mention. Normal group chatter and @Everyone stay local. The bridge forwards only addressed messages and replies in the original group. Keep group participants informed and verify that the assistant's native context and tool permissions are suitable for the group.
 

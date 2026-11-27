@@ -21,6 +21,7 @@ export interface SubmissionPlan
   replyMessageID: string | null;
   body: string;
   artifactLinks: string[];
+  audience?: string;
 }
 
 export class DeliveryStore
@@ -46,6 +47,9 @@ export class DeliveryStore
       );
       CREATE TABLE IF NOT EXISTS thread_routes (
         thread_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS group_thread_audiences (
+        thread_id TEXT PRIMARY KEY, audience TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS outbound (
         relay_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, state INTEGER NOT NULL
@@ -194,7 +198,7 @@ export class DeliveryStore
       .run(DeliveryState.Blocked, messageID);
   }
 
-  recordSubmission(message: InboundRecord, result: RelaySubmission): void
+  recordSubmission(message: InboundRecord, result: RelaySubmission, audience?: string): void
   {
     this.transaction(() =>
     {
@@ -206,6 +210,17 @@ export class DeliveryStore
       if (route !== message.conversationID)
       {
         throw new BridgeError('Relay thread belongs to a different native conversation.');
+      }
+
+      if (audience !== undefined)
+      {
+        this.database.prepare('INSERT OR IGNORE INTO group_thread_audiences VALUES (?, ?)')
+          .run(result.threadId, audience);
+
+        if (this.threadAudience(result.threadId) !== audience)
+        {
+          throw new BridgeError('Relay thread belongs to a different group audience.');
+        }
       }
 
       this.database.prepare('INSERT INTO native_links VALUES (?, ?, ?, NULL)')
@@ -220,6 +235,13 @@ export class DeliveryStore
     const row = this.database.prepare('SELECT conversation_id FROM thread_routes WHERE thread_id = ?').get(threadID);
 
     return typeof row?.conversation_id === 'string' ? row.conversation_id : undefined;
+  }
+
+  threadAudience(threadID: string): string | undefined
+  {
+    const row = this.database.prepare('SELECT audience FROM group_thread_audiences WHERE thread_id = ?').get(threadID);
+
+    return typeof row?.audience === 'string' ? row.audience : undefined;
   }
 
   hasOutbound(messageID: string): boolean

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { BridgeError } from './BridgeError.js';
 import type { MessagingBackend } from './Contracts.js';
 
@@ -50,27 +52,28 @@ export class GroupPolicy
       (this.settings.mode === GroupMode.Allowlist && this.approvals.has(groupID)));
   }
 
-  async permits(groupID: string, senderID?: string): Promise<boolean>
+  async audience(groupID: string, senderID?: string): Promise<string | undefined>
   {
     if (!this.accepts(groupID))
     {
-      return false;
+      return undefined;
     }
 
     const members = await this.backend.groupMembers(groupID);
     if (!members || !members.includes(this.accountID) || (senderID && !members.includes(senderID)))
     {
-      return false;
+      return undefined;
     }
 
-    if (this.settings.mode === GroupMode.Open)
-    {
-      return true;
-    }
-
-    const approved = this.approvals.get(groupID);
     const current = new Set(members);
+    const approved = this.approvals.get(groupID);
 
-    return Boolean(approved && approved.size === current.size && [...current].every(id => approved.has(id)));
+    if (this.settings.mode === GroupMode.Allowlist &&
+        (!approved || approved.size !== current.size || [...current].some(id => !approved.has(id))))
+    {
+      return undefined;
+    }
+
+    return createHash('sha256').update(JSON.stringify([...current].sort())).digest('hex');
   }
 }

@@ -464,3 +464,29 @@ test('explicitly open groups still require current membership and a direct menti
 
   assert.equal(s.messaging.deliveries.length, 0);
 });
+
+test('a changed group audience starts a separate conversation and cannot receive old replies after approval', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  s.groupRequest('old', 'company', 'employee', '@AI prepare report', true);
+  await s.bridge.cycle();
+  const oldThread = s.relay.submissions[0]!.thread;
+
+  s.messaging.groups.set('company', ['company-line', 'employee', 'new-member']);
+  s.groupRequest('new', 'company', 'new-member', '@AI hello', true);
+  s.answer(oldThread, 'old-answer');
+  await s.bridge.cycle();
+
+  const newThread = s.relay.submissions[1]!.thread;
+  assert.notEqual(oldThread, newThread);
+  assert.equal(s.store.blockedOutbound, 1);
+  assert.equal(s.messaging.deliveries.length, 0);
+
+  s.answer(newThread, 'new-answer');
+  await s.bridge.cycle();
+
+  assert.equal(s.messaging.deliveries.length, 1);
+  assert.equal(s.messaging.deliveries[0]!.conversation, 'group:company');
+});

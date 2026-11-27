@@ -71,27 +71,22 @@ export class Bridge
     return true;
   }
 
-  private async permits(conversationID: string, senderID?: string): Promise<boolean>
-  {
-    const groupID = ConversationAddress.groupID(conversationID);
-
-    return groupID === undefined
-      ? this.policy.permits(senderID ?? conversationID)
-      : this.groupPolicy.permits(groupID, senderID);
-  }
-
   private async submitPending(): Promise<void>
   {
     for (const message of this.store.pending())
     {
-      if (!await this.permits(message.conversationID, message.senderID))
+      const groupID = ConversationAddress.groupID(message.conversationID);
+      const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID, message.senderID);
+      const permitted = groupID === undefined ? await this.policy.permits(message.senderID) : audience !== undefined;
+
+      if (!permitted)
       {
         this.store.block(message.messageID);
         this.logger.info('/native/message/blocked', { native_message_id: message.messageID });
         continue;
       }
 
-      const plan = this.router.plan(message);
+      const plan = this.router.plan(message, audience);
 
       if (!plan)
       {
@@ -110,7 +105,7 @@ export class Bridge
         throw new BridgeError('Invalid Relay submission correlation.');
       }
 
-      this.store.recordSubmission(message, result);
+      this.store.recordSubmission(message, result, plan.audience);
       this.logger.info('/relay/message/submitted', {
         native_message_id: message.messageID, relay_message_id: result.messageId, relay_thread_id: result.threadId,
       });
@@ -133,7 +128,13 @@ export class Bridge
       return;
     }
 
-    if (!await this.permits(conversationID))
+    const groupID = ConversationAddress.groupID(conversationID);
+    const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID);
+    const permitted = groupID === undefined
+      ? await this.policy.permits(conversationID)
+      : audience !== undefined && audience === this.store.threadAudience(message.threadId);
+
+    if (!permitted)
     {
       this.store.blockOutbound(message);
       this.logger.info('/native/reply/blocked', { relay_message_id: message.id, relay_thread_id: message.threadId });
