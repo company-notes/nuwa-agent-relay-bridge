@@ -54,6 +54,11 @@ export class GroupPolicy
     }
   }
 
+  static fingerprint(members: Iterable<string>): string
+  {
+    return createHash('sha256').update(JSON.stringify([...new Set(members)].sort())).digest('hex');
+  }
+
   accepts(groupID: string): boolean
   {
     return Boolean(groupID) && (this.settings.mode === GroupMode.Open ||
@@ -95,7 +100,7 @@ export class GroupPolicy
       return undefined;
     }
 
-    return { fingerprint: createHash('sha256').update(JSON.stringify([...current].sort())).digest('hex'),
+    return { fingerprint: GroupPolicy.fingerprint(current),
       memberCount: current.size };
   }
 }

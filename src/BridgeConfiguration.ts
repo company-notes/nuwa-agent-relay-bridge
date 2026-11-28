@@ -3,6 +3,7 @@ import { GroupPolicy, type GroupSettings } from './GroupPolicy.js';
 import { BridgeError } from './BridgeError.js';
 import type { BridgeBinding } from './Contracts.js';
 import { PrivateJSON } from './PrivateJSON.js';
+import { GroupActivationPolicy, type ConversationSettings } from './GroupActivationPolicy.js';
 
 export interface BridgeConfig
 {
@@ -13,6 +14,7 @@ export interface BridgeConfig
   recipient_address: string;
   access: AccessSettings;
   groups?: GroupSettings;
+  conversation?: ConversationSettings;
 }
 
 export class BridgeConfiguration
@@ -38,11 +40,17 @@ export class BridgeConfiguration
       session_id: saved.session_id, canonical: saved.canonical, account_id: saved.account_id,
       recipient_session_id: saved.recipient_session_id, recipient_address: saved.recipient_address,
       access, groups: saved.groups ?? GroupPolicy.disabled,
+      ...(saved.conversation === undefined ? {} : { conversation: saved.conversation }),
     };
 
     this.binding(config);
     AccessPolicy.validate(config.access);
     GroupPolicy.validate(config.groups ?? GroupPolicy.disabled);
+
+    if (config.conversation !== undefined)
+    {
+      GroupActivationPolicy.validate(config.conversation);
+    }
 
     return config;
   }
@@ -52,6 +60,11 @@ export class BridgeConfiguration
     this.binding(config);
     AccessPolicy.validate(config.access);
     GroupPolicy.validate(config.groups ?? GroupPolicy.disabled);
+
+    if (config.conversation !== undefined)
+    {
+      GroupActivationPolicy.validate(config.conversation);
+    }
     this.file.write(config);
   }
 

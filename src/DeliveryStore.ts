@@ -14,7 +14,7 @@ export enum DeliveryState
   Ignored = 5,
 }
 
-export type InboundRecord = NativeMessage & { submissionID: string; receivedAudience?: string };
+export type InboundRecord = NativeMessage & { submissionID: string; receivedAudience?: string; context?: string };
 export type ConversationRoute = { conversationID: string; threadID: string; replyMessageID: string | null };
 
 export interface SubmissionPlan
@@ -64,6 +64,9 @@ export class DeliveryStore
       CREATE TABLE IF NOT EXISTS inbound_group_audiences (
         message_id TEXT PRIMARY KEY, audience TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS inbound_context (
+        message_id TEXT PRIMARY KEY, context TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS submission_plans (
         message_id TEXT PRIMARY KEY, plan TEXT NOT NULL
       );
@@ -105,12 +108,17 @@ export class DeliveryStore
     }
   }
 
-  accept(message: NativeMessage, receivedAudience?: string): boolean
+  hasInbound(messageID: string): boolean
   {
-    return this.recordInbound(message, DeliveryState.Pending, receivedAudience);
+    return this.database.prepare('SELECT 1 FROM inbound WHERE message_id = ?').get(messageID) !== undefined;
   }
 
-  private recordInbound(message: NativeMessage, state: DeliveryState, receivedAudience?: string): boolean
+  accept(message: NativeMessage, receivedAudience?: string, context?: string): boolean
+  {
+    return this.recordInbound(message, DeliveryState.Pending, receivedAudience, context);
+  }
+
+  private recordInbound(message: NativeMessage, state: DeliveryState, receivedAudience?: string, context?: string): boolean
   {
     let accepted = false;
 
@@ -131,6 +139,11 @@ export class DeliveryStore
           .run(message.messageID, receivedAudience);
       }
 
+      if (accepted && context !== undefined)
+      {
+        this.database.prepare('INSERT INTO inbound_context VALUES (?, ?)').run(message.messageID, context);
+      }
+
       if (accepted && message.artifactLinks?.length)
       {
         this.database.prepare('INSERT INTO inbound_artifacts VALUES (?, ?)')
@@ -146,14 +159,16 @@ export class DeliveryStore
     return this.database.prepare(`
       SELECT i.message_id AS messageID, i.conversation_id AS conversationID, i.sender_id AS senderID,
              i.body, i.reply_to_id AS replyToID, i.submission_id AS submissionID, a.links,
-             g.audience AS receivedAudience
+             g.audience AS receivedAudience, c.context
       FROM inbound i LEFT JOIN inbound_artifacts a ON a.message_id = i.message_id
       LEFT JOIN inbound_group_audiences g ON g.message_id = i.message_id
+      LEFT JOIN inbound_context c ON c.message_id = i.message_id
       WHERE i.state = ? ORDER BY i.rowid
     `).all(DeliveryState.Pending).map(row => ({
       messageID: String(row.messageID), conversationID: String(row.conversationID),
       senderID: String(row.senderID), body: String(row.body), submissionID: String(row.submissionID),
       ...(row.receivedAudience === null ? {} : { receivedAudience: String(row.receivedAudience) }),
+      ...(row.context === null ? {} : { context: String(row.context) }),
       artifactLinks: row.links === null ? [] : JSON.parse(String(row.links)) as string[],
       ...(row.replyToID === null ? {} : { replyToID: String(row.replyToID) }),
     }));
