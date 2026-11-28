@@ -15,7 +15,7 @@ export enum DeliveryState
   Ignored = 5,
 }
 
-export type InboundRecord = NativeMessage & { submissionID: string; receivedAudience?: string; context?: string };
+export type InboundRecord = NativeMessage & { submissionID: string; context?: string };
 export type ConversationRoute = { conversationID: string; threadID: string; replyMessageID: string | null };
 
 export interface SubmissionPlan
@@ -24,7 +24,6 @@ export interface SubmissionPlan
   replyMessageID: string | null;
   body: string;
   artifactLinks: string[];
-  audience?: string;
 }
 
 export class DeliveryStore
@@ -55,17 +54,11 @@ export class DeliveryStore
       CREATE TABLE IF NOT EXISTS thread_routes (
         thread_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS group_thread_audiences (
-        thread_id TEXT PRIMARY KEY, audience TEXT NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS outbound (
         relay_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, state INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS inbound_artifacts (
         message_id TEXT PRIMARY KEY, links TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS inbound_group_audiences (
-        message_id TEXT PRIMARY KEY, audience TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS inbound_context (
         message_id TEXT PRIMARY KEY, context TEXT NOT NULL
@@ -81,7 +74,16 @@ export class DeliveryStore
     try
     {
       this.assistant = new AssistantBinding(this.database, binding);
-      this.transaction(() => this.assistant.initialize(this.pendingCount, this.unresolved));
+      this.transaction(() =>
+      {
+        this.assistant.initialize(this.pendingCount, this.unresolved);
+        this.database.exec(`
+          DROP TABLE IF EXISTS group_thread_audiences;
+          DROP TABLE IF EXISTS inbound_group_audiences;
+          UPDATE submission_plans SET plan = json_remove(plan, '$.audience')
+          WHERE json_type(plan, '$.audience') IS NOT NULL;
+        `);
+      });
 
       this.conversationHistory = new ConversationHistory(this.database, this.assistant.generation);
     }
@@ -118,12 +120,12 @@ export class DeliveryStore
     return this.database.prepare('SELECT 1 FROM inbound WHERE message_id = ?').get(messageID) !== undefined;
   }
 
-  accept(message: NativeMessage, receivedAudience?: string, context?: string): boolean
+  accept(message: NativeMessage, context?: string): boolean
   {
-    return this.recordInbound(message, DeliveryState.Pending, receivedAudience, context);
+    return this.recordInbound(message, DeliveryState.Pending, context);
   }
 
-  private recordInbound(message: NativeMessage, state: DeliveryState, receivedAudience?: string, context?: string): boolean
+  private recordInbound(message: NativeMessage, state: DeliveryState, context?: string): boolean
   {
     let accepted = false;
 
@@ -137,12 +139,6 @@ export class DeliveryStore
         message.replyToID ?? null, randomUUID(), state);
 
       accepted = Number(result.changes) === 1;
-
-      if (accepted && receivedAudience !== undefined)
-      {
-        this.database.prepare('INSERT INTO inbound_group_audiences VALUES (?, ?)')
-          .run(message.messageID, receivedAudience);
-      }
 
       if (accepted && context !== undefined)
       {
@@ -164,15 +160,13 @@ export class DeliveryStore
     return this.database.prepare(`
       SELECT i.message_id AS messageID, i.conversation_id AS conversationID, i.sender_id AS senderID,
              i.body, i.reply_to_id AS replyToID, i.submission_id AS submissionID, a.links,
-             g.audience AS receivedAudience, c.context
+             c.context
       FROM inbound i LEFT JOIN inbound_artifacts a ON a.message_id = i.message_id
-      LEFT JOIN inbound_group_audiences g ON g.message_id = i.message_id
       LEFT JOIN inbound_context c ON c.message_id = i.message_id
       WHERE i.state = ? ORDER BY i.rowid
     `).all(DeliveryState.Pending).map(row => ({
       messageID: String(row.messageID), conversationID: String(row.conversationID),
       senderID: String(row.senderID), body: String(row.body), submissionID: String(row.submissionID),
-      ...(row.receivedAudience === null ? {} : { receivedAudience: String(row.receivedAudience) }),
       ...(row.context === null ? {} : { context: String(row.context) }),
       artifactLinks: row.links === null ? [] : JSON.parse(String(row.links)) as string[],
       ...(row.replyToID === null ? {} : { replyToID: String(row.replyToID) }),
@@ -231,7 +225,7 @@ export class DeliveryStore
     this.recordInbound({ ...message, body: '', replyToID: undefined, artifactLinks: [] }, state);
   }
 
-  recordSubmission(message: InboundRecord, result: RelaySubmission, audience?: string): void
+  recordSubmission(message: InboundRecord, result: RelaySubmission): void
   {
     this.transaction(() =>
     {
@@ -244,17 +238,6 @@ export class DeliveryStore
       if (route !== message.conversationID)
       {
         throw new BridgeError('Relay thread belongs to a different native conversation.');
-      }
-
-      if (audience !== undefined)
-      {
-        this.database.prepare('INSERT OR IGNORE INTO group_thread_audiences VALUES (?, ?)')
-          .run(result.threadId, audience);
-
-        if (this.threadAudience(result.threadId) !== audience)
-        {
-          throw new BridgeError('Relay thread belongs to a different group audience.');
-        }
       }
 
       this.database.prepare('INSERT INTO native_links VALUES (?, ?, ?, NULL)')
@@ -280,13 +263,6 @@ export class DeliveryStore
 
     return row ? { conversationID: String(row.conversationID), recipientSessionID: String(row.recipientSessionID),
       active: Number(row.active) === 1 } : undefined;
-  }
-
-  threadAudience(threadID: string): string | undefined
-  {
-    const row = this.database.prepare('SELECT audience FROM group_thread_audiences WHERE thread_id = ?').get(threadID);
-
-    return typeof row?.audience === 'string' ? row.audience : undefined;
   }
 
   hasOutbound(messageID: string): boolean

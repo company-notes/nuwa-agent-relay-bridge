@@ -41,9 +41,10 @@ test('an existing pilot upgrade preserves identity and approval until an adminis
   assert.equal(config.read().access.mode, AccessMode.Open);
 
   const groups = { mode: GroupMode.Allowlist, approved_groups: [{ id: 'company', member_ids: ['line', 'approved'] }] };
-  config.write({ ...config.read(), groups });
+  file.write({ ...config.read(), groups, conversation: { assistant_name: '小媧', approved_groups: groups.approved_groups } });
 
-  assert.deepEqual(config.read().groups, groups);
+  assert.deepEqual(config.read().groups, { mode: GroupMode.Allowlist, approved_groups: [{ id: 'company' }] });
+  assert.deepEqual(config.read().conversation, { assistant_name: '小媧', approved_groups: [{ id: 'company' }] });
   assert.equal(config.read().access.mode, AccessMode.Open);
 
   const reopened = new DeliveryStore(databasePath, config.binding(config.read()));
@@ -92,6 +93,6 @@ test('interrupted assistant selection reconciles the durable switch intent with 
   const stored = JSON.parse(String(row?.value)) as { version: number; identity: string[] };
   database.close();
 
-  assert.equal(stored.version, 2);
+  assert.equal(stored.version, 3);
   assert.deepEqual(stored.identity, ['bridge', 'line', 'ava', 'example/ava/main']);
 });

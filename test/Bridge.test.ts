@@ -156,7 +156,7 @@ class Scenario
     this.store.close();
 
     const database = new DatabaseSync(join(this.dir, 'delivery.sqlite3'));
-    database.exec('DROP TABLE assistant_state; DROP TABLE thread_assistants; DROP TABLE inbound_group_audiences;');
+    database.exec('DROP TABLE assistant_state; DROP TABLE thread_assistants; DROP TABLE IF EXISTS inbound_group_audiences;');
     database.prepare('UPDATE bridge_binding SET value = ? WHERE id = 1').run(JSON.stringify([
       this.binding.sessionID, this.binding.accountID, this.binding.recipientSessionID, this.binding.recipientAddress,
     ]));
@@ -422,7 +422,7 @@ test('company group members mention the assistant and quote its reply without mi
   const members = ['company-line', 'employee', 'coworker'];
   const s = new Scenario(undefined, {
     mode: GroupMode.Allowlist,
-    approved_groups: [{ id: 'company', member_ids: members }, { id: 'project', member_ids: members }],
+    approved_groups: [{ id: 'company' }, { id: 'project' }],
   });
   t.after(() => s.close());
 
@@ -465,7 +465,7 @@ test('company group members mention the assistant and quote its reply without mi
   assert.equal(s.relay.submissions[4]!.thread, project);
 });
 
-test('group access remains disabled until configured and changed membership blocks delayed replies', async t =>
+test('group allowlist follows stable group identity while unknown senders remain blocked', async t =>
 {
   const members = ['company-line', 'employee'];
   const disabled = new Scenario();
@@ -475,7 +475,7 @@ test('group access remains disabled until configured and changed membership bloc
   assert.equal(await disabled.groupRequest('ignored', 'company', 'employee', '@AI hello', true), false);
 
   const s = new Scenario(undefined, {
-    mode: GroupMode.Allowlist, approved_groups: [{ id: 'company', member_ids: members }],
+    mode: GroupMode.Allowlist, approved_groups: [{ id: 'company' }],
   });
   t.after(() => s.close());
 
@@ -492,10 +492,11 @@ test('group access remains disabled until configured and changed membership bloc
   await s.groupRequest('changed', 'company', 'employee', '@AI another report', true);
   await s.bridge.cycle();
 
-  assert.equal(s.relay.submissions.length, 1);
-  assert.equal(s.store.blocked, 2);
-  assert.equal(s.messaging.deliveries.length, 0);
-  assert.equal(s.store.blockedOutbound, 1);
+  assert.equal(s.relay.submissions.length, 2);
+  assert.equal(s.relay.submissions[1]!.thread, s.relay.submissions[0]!.thread);
+  assert.equal(s.store.blocked, 1);
+  assert.equal(s.messaging.deliveries.length, 1);
+  assert.equal(s.store.blockedOutbound, 0);
 });
 
 test('explicitly open groups still require verified current membership', async t =>
@@ -518,7 +519,7 @@ test('explicitly open groups still require verified current membership', async t
   assert.equal(s.messaging.deliveries.length, 0);
 });
 
-test('a changed group audience starts a separate conversation and cannot receive old replies after approval', async t =>
+test('a new group member continues the same conversation and receives delayed replies', async t =>
 {
   const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
   t.after(() => s.close());
@@ -535,14 +536,14 @@ test('a changed group audience starts a separate conversation and cannot receive
   await s.bridge.cycle();
 
   const newThread = s.relay.submissions[1]!.thread;
-  assert.notEqual(oldThread, newThread);
-  assert.equal(s.store.blockedOutbound, 1);
-  assert.equal(s.messaging.deliveries.length, 0);
+  assert.equal(oldThread, newThread);
+  assert.equal(s.store.blockedOutbound, 0);
+  assert.equal(s.messaging.deliveries.length, 1);
 
   s.answer(newThread, 'new-answer');
   await s.bridge.cycle();
 
-  assert.equal(s.messaging.deliveries.length, 1);
+  assert.equal(s.messaging.deliveries.length, 2);
   assert.equal(s.messaging.deliveries[0]!.conversation, 'group:company');
 });
 
@@ -571,14 +572,14 @@ test('an authorized two-member group chats normally and a larger group only forw
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 3);
-  assert.notEqual(s.relay.submissions[2]!.thread, firstThread);
+  assert.equal(s.relay.submissions[2]!.thread, firstThread);
 
   s.messaging.groups.set('company', ['company-line', 'employee']);
   await s.groupRequest('small-again', 'company', 'employee', 'Continue');
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 4);
-  assert.notEqual(s.relay.submissions[3]!.thread, s.relay.submissions[2]!.thread);
+  assert.equal(s.relay.submissions[3]!.thread, s.relay.submissions[2]!.thread);
 });
 
 test('switching the assistant preserves the account, starts new conversations and protects former routes', async t =>
@@ -663,7 +664,7 @@ test('unaddressed large-group chatter stays local even when the audience shrinks
   assert.match(s.relay.submissions[0]!.body, /Hello assistant/);
 });
 
-test('a group message accepted for one audience is withheld after membership changes before submission', async t =>
+test('an accepted group message is submitted after the sender leaves while the Bridge remains', async t =>
 {
   const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
   t.after(() => s.close());
@@ -671,11 +672,11 @@ test('a group message accepted for one audience is withheld after membership cha
   s.messaging.groups.set('company', ['company-line', 'employee']);
   await s.groupRequest('addressed', 'company', 'employee', '@AI prepare report', true);
 
-  s.messaging.groups.set('company', ['company-line', 'employee', 'new-member']);
+  s.messaging.groups.set('company', ['company-line', 'new-member']);
   await s.bridge.cycle();
 
-  assert.equal(s.relay.submissions.length, 0);
-  assert.equal(s.store.blocked, 1);
+  assert.equal(s.relay.submissions.length, 1);
+  assert.equal(s.store.blocked, 0);
 });
 
 test('an installed bridge upgrades with existing private and group threads and cuts over without losing their history', async t =>
@@ -767,7 +768,7 @@ class NaturalConversationScenario extends Scenario
   constructor(model = new ControlledDecision(), clock?: () => number)
   {
     super(undefined, { mode: GroupMode.Open, approved_groups: [] }, {
-      assistant_name: '小媧', approved_groups: [{ id: 'company', member_ids: NaturalConversationScenario.members }],
+      assistant_name: '小媧', approved_groups: [{ id: 'company' }],
     }, model, clock);
     this.model = model;
     this.messaging.groups.set('company', [...NaturalConversationScenario.members]);
@@ -835,7 +836,7 @@ test('ordinary chatter, low-confidence decisions, duplicate messages and other g
   assert.equal(s.model.inputs[1]!.history.filter(turn => turn.text.includes('午餐')).length, 1);
 });
 
-test('an expired or changed audience loses natural conversation context and requires renewed approval', async t =>
+test('expired dialogue is pruned but current group conversation survives membership changes', async t =>
 {
   let now = 1000;
   const s = new NaturalConversationScenario(undefined, () => now);
@@ -855,12 +856,12 @@ test('an expired or changed audience loses natural conversation context and requ
   s.messaging.groups.set('company', [...NaturalConversationScenario.members, 'new-member']);
   await s.groupRequest('new-roster', 'company', 'employee', '小媧，妳好');
   await s.bridge.cycle();
-  assert.equal(s.model.inputs.length, 0);
+  assert.equal(s.model.inputs.length, 1);
 
   s.messaging.groups.set('company', [...NaturalConversationScenario.members]);
   await s.groupRequest('returned', 'company', 'employee', '妳好啊');
   await s.bridge.cycle();
-  assert.equal(s.model.inputs.length, 0);
+  assert.equal(s.model.inputs.length, 2);
 });
 
 test('a model outage keeps native mentions and private chats working without forwarding uncertain chatter', async t =>
