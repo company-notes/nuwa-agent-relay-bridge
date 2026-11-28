@@ -13,18 +13,18 @@ import { DeliveryStore } from '../src/DeliveryStore.js';
 
 class ControlledRelay implements RelayClient
 {
-  readonly submissions: { id: string; thread: string; body: string; replyTo?: string; artifactLinks?: string[] }[] = [];
+  readonly submissions: { id: string; thread: string; body: string; replyTo?: string; artifactLinks?: string[]; to?: string }[] = [];
   readonly messages: RelayMessage[] = [];
   failAfterAccept = false;
 
-  async send(_to: string, body: string, id: string, artifactLinks?: string[]): Promise<RelaySubmission>
+  async send(to: string, body: string, id: string, artifactLinks?: string[]): Promise<RelaySubmission>
   {
     const prior = this.submissions.find(item => item.id === id);
     const thread = prior?.thread ?? 'thread-' + id;
 
     if (!prior)
     {
-      this.submissions.push({ id, thread, body, artifactLinks });
+      this.submissions.push({ id, thread, body, artifactLinks, to });
     }
 
     if (this.failAfterAccept)
@@ -105,6 +105,7 @@ class Scenario
     recipientAddress: 'example/may/main', recipientSessionID: 'assistant-session',
   };
 
+  private binding = Scenario.binding;
   readonly dir = mkdtempSync(join(tmpdir(), 'nuwa-bridge-'));
   readonly relay = new ControlledRelay();
   readonly messaging = new ControlledMessaging();
@@ -122,12 +123,12 @@ class Scenario
 
   private open(): DeliveryStore
   {
-    return new DeliveryStore(join(this.dir, 'delivery.sqlite3'), Scenario.binding);
+    return new DeliveryStore(join(this.dir, 'delivery.sqlite3'), this.binding);
   }
 
   private createBridge(): Bridge
   {
-    return new Bridge(Scenario.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
+    return new Bridge(this.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
       new GroupPolicy(this.groupSettings, this.messaging, Scenario.binding.accountID));
   }
 
@@ -136,6 +137,14 @@ class Scenario
     this.store.close();
     this.store = this.open();
     this.bridge = this.createBridge();
+  }
+
+  switchAssistant(recipientSessionID: string, recipientAddress: string): void
+  {
+    const next = { ...this.binding, recipientSessionID, recipientAddress };
+    this.store.prepareAssistantSwitch(next);
+    this.binding = next;
+    this.restart();
   }
 
   request(id: string, body: string, quote?: string, senderID = 'employee', artifactLinks?: string[]): boolean
@@ -528,4 +537,64 @@ test('an authorized two-member group chats normally and a larger group only forw
 
   assert.equal(s.relay.submissions.length, 4);
   assert.notEqual(s.relay.submissions[3]!.thread, s.relay.submissions[2]!.thread);
+});
+
+test('switching the assistant preserves the account, starts new conversations and protects former routes', async t =>
+{
+  const s = new Scenario();
+  t.after(() => s.close());
+
+  s.request('chief-request', 'Prepare report');
+  await s.bridge.cycle();
+  const chiefThread = s.relay.submissions[0]!.thread;
+  s.answer(chiefThread, 'chief-answer');
+  await s.bridge.cycle();
+
+  s.switchAssistant('ava-session', 'example/ava/main');
+  s.request('old-quote', 'Continue old work', 'line-1');
+  s.request('ava-request', 'Hello Ava');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 2);
+  const ava = s.relay.submissions[1]!;
+  assert.equal(ava.to, 'example/ava/main');
+  assert.notEqual(ava.thread, chiefThread);
+
+  s.answer(chiefThread, 'former-assistant-late');
+  s.answer(ava.thread, 'wrong-ava-sender');
+  s.answer(ava.thread, 'ava-answer', 'ava-session');
+  await s.bridge.cycle();
+
+  assert.equal(s.messaging.deliveries.length, 2);
+  assert.equal(s.messaging.deliveries[1]!.conversation, 'employee');
+
+  s.request('ava-follow-up', 'Tomorrow?', 'line-2');
+  await s.bridge.cycle();
+  assert.equal(s.relay.submissions[2]!.thread, ava.thread);
+
+  s.switchAssistant('assistant-session', 'example/may/main');
+  s.request('switch-back', 'New request');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[3]!.to, 'example/may/main');
+  assert.notEqual(s.relay.submissions[3]!.thread, chiefThread);
+  assert.notEqual(s.relay.submissions[3]!.thread, ava.thread);
+});
+
+test('pending submissions prevent an assistant switch until original work is reconciled', async t =>
+{
+  const s = new Scenario();
+  t.after(() => s.close());
+
+  s.request('pending', 'Prepare report');
+  assert.throws(() => s.switchAssistant('ava-session', 'example/ava/main'), /pending/i);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[0]!.to, 'example/may/main');
+
+  s.switchAssistant('ava-session', 'example/ava/main');
+  s.request('new', 'Hello Ava');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[1]!.to, 'example/ava/main');
 });

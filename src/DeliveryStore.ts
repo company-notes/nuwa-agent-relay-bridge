@@ -76,6 +76,11 @@ export class DeliveryStore
     }
   }
 
+  prepareAssistantSwitch(_next: BridgeBinding): void
+  {
+    throw new BridgeError('Assistant switching is not implemented.');
+  }
+
   private bindIdentity(binding: BridgeBinding): void
   {
     const identity = [binding.sessionID, binding.accountID, binding.recipientSessionID, binding.recipientAddress];

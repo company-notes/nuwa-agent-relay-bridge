@@ -49,3 +49,38 @@ test('an existing pilot upgrade preserves identity and approval until an adminis
   const reopened = new DeliveryStore(databasePath, config.binding(config.read()));
   reopened.close();
 });
+
+test('interrupted assistant selection reconciles the durable switch intent with the saved configuration', t =>
+{
+  const directory = mkdtempSync(join(tmpdir(), 'bridge-switch-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, 'delivery.sqlite3');
+  const config = new BridgeConfiguration(new PrivateJSON(join(directory, 'config.json')));
+  const initial = {
+    session_id: 'bridge', canonical: 'example/line/main', account_id: 'line',
+    recipient_session_id: 'chief', recipient_address: 'example/chief/main',
+    access: { mode: AccessMode.Friends, allowed_user_ids: [] }, groups: GroupPolicy.disabled,
+  };
+  const next = { ...initial, recipient_session_id: 'ava', recipient_address: 'example/ava/main' };
+  config.write(initial);
+
+  let store = new DeliveryStore(path, config.binding(initial));
+  store.prepareAssistantSwitch(config.binding(next));
+  store.close();
+
+  // Interruption before the config rename retains the current assistant.
+  store = new DeliveryStore(path, config.binding(config.read()));
+  store.close();
+  assert.throws(() => new DeliveryStore(path, config.binding(next)), /identity differs/);
+
+  store = new DeliveryStore(path, config.binding(initial));
+  store.prepareAssistantSwitch(config.binding(next));
+  config.write(next);
+  store.close();
+
+  // Interruption after the rename completes the recorded switch on startup.
+  store = new DeliveryStore(path, config.binding(config.read()));
+  store.close();
+  assert.deepEqual(config.read(), next);
+  assert.throws(() => new DeliveryStore(path, config.binding(initial)), /identity differs/);
+});
