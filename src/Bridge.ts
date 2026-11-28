@@ -33,6 +33,7 @@ export class Bridge
     }
 
     const groupID = ConversationAddress.groupID(message.conversationID);
+    let groupAddressed: boolean | undefined;
 
     if (groupID !== undefined)
     {
@@ -44,13 +45,15 @@ export class Bridge
       const quote = message.replyToID ? this.store.findQuote(message.replyToID, message.conversationID) : undefined;
       const quotesAssistant = Boolean(quote?.replyMessageID);
 
-      if (!message.mentionsAccount && !quotesAssistant)
-      {
-        return false;
-      }
+      groupAddressed = Boolean(message.mentionsAccount || quotesAssistant);
 
       if (message.replyToID && !quote)
       {
+        if (!groupAddressed)
+        {
+          return false;
+        }
+
         message = { ...message, replyToID: undefined };
       }
     }
@@ -64,7 +67,7 @@ export class Bridge
       throw new BridgeError('Invalid native text message.');
     }
 
-    if (this.store.accept(message))
+    if (this.store.accept(message, groupAddressed))
     {
       this.logger.info('/native/message/received', { native_message_id: message.messageID });
     }
@@ -87,7 +90,13 @@ export class Bridge
         continue;
       }
 
-      const plan = this.router.plan(message, audience);
+      if (audience && audience.memberCount !== 2 && !message.groupAddressed)
+      {
+        this.store.ignore(message.messageID);
+        continue;
+      }
+
+      const plan = this.router.plan(message, audience?.fingerprint);
 
       if (!plan)
       {
@@ -133,7 +142,7 @@ export class Bridge
     const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID);
     const permitted = groupID === undefined
       ? await this.policy.permits(conversationID)
-      : audience !== undefined && audience === this.store.threadAudience(message.threadId);
+      : audience !== undefined && audience.fingerprint === this.store.threadAudience(message.threadId);
 
     if (!permitted)
     {

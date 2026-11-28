@@ -23,6 +23,12 @@ export interface GroupSettings
   approved_groups: GroupApproval[];
 }
 
+export interface GroupAudience
+{
+  fingerprint: string;
+  memberCount: number;
+}
+
 export class GroupPolicy
 {
   static readonly disabled: GroupSettings = { mode: GroupMode.Disabled, approved_groups: [] };
@@ -54,7 +60,7 @@ export class GroupPolicy
       (this.settings.mode === GroupMode.Allowlist && this.approvals.has(groupID)));
   }
 
-  async audience(groupID: string, senderID?: string): Promise<string | undefined>
+  async audience(groupID: string, senderID?: string): Promise<GroupAudience | undefined>
   {
     if (!this.accepts(groupID))
     {
@@ -89,6 +95,7 @@ export class GroupPolicy
       return undefined;
     }
 
-    return createHash('sha256').update(JSON.stringify([...current].sort())).digest('hex');
+    return { fingerprint: createHash('sha256').update(JSON.stringify([...current].sort())).digest('hex'),
+      memberCount: current.size };
   }
 }

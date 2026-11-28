@@ -36,7 +36,7 @@ export class LineMessage
 
     try
     {
-      return message.getMentions().some(mention => !mention.all && mention.mid === accountID);
+      return message.getMentions().some(mention => mention.all === true || mention.mid === accountID);
     }
     catch
     {

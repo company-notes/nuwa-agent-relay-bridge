@@ -10,9 +10,10 @@ export enum DeliveryState
   Complete = 2,
   Uncertain = 3,
   Blocked = 4,
+  Ignored = 5,
 }
 
-export type InboundRecord = NativeMessage & { submissionID: string };
+export type InboundRecord = NativeMessage & { submissionID: string; groupAddressed: boolean };
 export type ConversationRoute = { conversationID: string; threadID: string; replyMessageID: string | null };
 
 export interface SubmissionPlan
@@ -56,6 +57,9 @@ export class DeliveryStore
       );
       CREATE TABLE IF NOT EXISTS inbound_artifacts (
         message_id TEXT PRIMARY KEY, links TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS group_activation (
+        message_id TEXT PRIMARY KEY, addressed INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS submission_plans (
         message_id TEXT PRIMARY KEY, plan TEXT NOT NULL
@@ -129,7 +133,7 @@ export class DeliveryStore
     }
   }
 
-  accept(message: NativeMessage): boolean
+  accept(message: NativeMessage, groupAddressed?: boolean): boolean
   {
     let accepted = false;
 
@@ -142,6 +146,12 @@ export class DeliveryStore
       `).run(message.messageID, message.conversationID, message.senderID, message.body,
         message.replyToID ?? null, randomUUID(), DeliveryState.Pending);
       accepted = Number(result.changes) === 1;
+
+      if (accepted && groupAddressed !== undefined)
+      {
+        this.database.prepare('INSERT INTO group_activation VALUES (?, ?)')
+          .run(message.messageID, groupAddressed ? 1 : 0);
+      }
 
       if (accepted && message.artifactLinks?.length)
       {
@@ -157,12 +167,15 @@ export class DeliveryStore
   {
     return this.database.prepare(`
       SELECT i.message_id AS messageID, i.conversation_id AS conversationID, i.sender_id AS senderID,
-             i.body, i.reply_to_id AS replyToID, i.submission_id AS submissionID, a.links
+             i.body, i.reply_to_id AS replyToID, i.submission_id AS submissionID, a.links,
+             COALESCE(g.addressed, 1) AS groupAddressed
       FROM inbound i LEFT JOIN inbound_artifacts a ON a.message_id = i.message_id
+      LEFT JOIN group_activation g ON g.message_id = i.message_id
       WHERE i.state = ? ORDER BY i.rowid
     `).all(DeliveryState.Pending).map(row => ({
       messageID: String(row.messageID), conversationID: String(row.conversationID),
       senderID: String(row.senderID), body: String(row.body), submissionID: String(row.submissionID),
+      groupAddressed: Number(row.groupAddressed) === 1,
       artifactLinks: row.links === null ? [] : JSON.parse(String(row.links)) as string[],
       ...(row.replyToID === null ? {} : { replyToID: String(row.replyToID) }),
     }));
@@ -201,6 +214,16 @@ export class DeliveryStore
   {
     this.database.prepare('UPDATE inbound SET state = ? WHERE message_id = ?')
       .run(DeliveryState.Blocked, messageID);
+  }
+
+  ignore(messageID: string): void
+  {
+    this.transaction(() =>
+    {
+      this.database.prepare("UPDATE inbound SET state = ?, body = '', reply_to_id = NULL WHERE message_id = ?")
+        .run(DeliveryState.Ignored, messageID);
+      this.database.prepare('DELETE FROM inbound_artifacts WHERE message_id = ?').run(messageID);
+    });
   }
 
   recordSubmission(message: InboundRecord, result: RelaySubmission, audience?: string): void

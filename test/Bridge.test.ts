@@ -389,7 +389,7 @@ test('company group members mention the assistant and quote its reply without mi
   s.messaging.groups.set('project', members);
   s.messaging.groups.set('external', members);
 
-  assert.equal(s.groupRequest('ordinary', 'company', 'employee', 'Casual conversation'), false);
+  s.groupRequest('ordinary', 'company', 'employee', 'Casual conversation');
   assert.equal(s.groupRequest('external', 'external', 'employee', '@AI secret?', true), false);
   assert.equal(s.groupRequest('loop', 'company', 'company-line', '@AI own reply', true), false);
 
@@ -457,7 +457,7 @@ test('group access remains disabled until configured and changed membership bloc
   assert.equal(s.store.blockedOutbound, 1);
 });
 
-test('explicitly open groups still require current membership and a direct mention', async t =>
+test('explicitly open groups still require verified current membership', async t =>
 {
   const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
   t.after(() => s.close());
