@@ -24,7 +24,7 @@ Use real SQLite databases in temporary directories for automated tests. Controll
 
 ## Assistant cutover and group activation
 
-- Switch the designated assistant while preserving account identity, policies and historical evidence. New conversations route to the new assistant. Pending submissions, historical quotes, delayed replies and interrupted configuration migrations obey the cutover contract. Switching back creates another generation.
+- Switch the designated assistant while preserving account identity, policies and historical evidence. New conversations route to the new assistant. Pending submissions, historical quotes, delayed replies and interrupted configuration migrations obey the cutover contract. Switching back creates another generation. Verify the prior pilot's persisted private and group routes migrate and remain available before cutover.
 - Authorize automatic conversation in a verified two-member group; require a direct mention, native @All or assistant quote in larger groups. Verify the audience at intake and submission; test member changes, reapproval, self messages, duplicate ambient events and @All.
 ## Additional live acceptance
 

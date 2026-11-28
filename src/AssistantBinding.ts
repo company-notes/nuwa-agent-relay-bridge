@@ -24,10 +24,33 @@ export class AssistantBinding
     return [binding.sessionID, binding.accountID, binding.recipientSessionID, binding.recipientAddress];
   }
 
-  private get state(): { generation: number; next_binding: string | null }
+  private static serialize(binding: BridgeBinding): string
   {
-    return this.database.prepare('SELECT generation, next_binding FROM assistant_state WHERE id = 1').get() as
-      { generation: number; next_binding: string | null };
+    return JSON.stringify({ version: 2, identity: AssistantBinding.identity(binding) });
+  }
+
+  private static decode(value: string): { identity: StoredIdentity; singleUser: boolean }
+  {
+    const saved: unknown = JSON.parse(value);
+    const singleUser = Array.isArray(saved) && saved.length === 5;
+    const identity: unknown = Array.isArray(saved)
+      ? (singleUser ? [saved[0], saved[1], saved[3], saved[4]] : saved)
+      : saved && typeof saved === 'object' && 'version' in saved && saved.version === 2 && 'identity' in saved
+        ? saved.identity : undefined;
+
+    if (!Array.isArray(identity) || identity.length !== 4 ||
+        identity.some(item => typeof item !== 'string' || !item))
+    {
+      throw new BridgeError('Stored bridge identity differs from configuration.');
+    }
+
+    return { identity: identity as StoredIdentity, singleUser };
+  }
+
+  private get state(): { generation: number; nextBinding: string | null }
+  {
+    return this.database.prepare('SELECT generation, next_binding AS nextBinding FROM assistant_state WHERE id = 1').get() as
+      { generation: number; nextBinding: string | null };
   }
 
   get generation(): number
@@ -38,21 +61,15 @@ export class AssistantBinding
   initialize(pendingCount: number, unresolved: number): void
   {
     const identity = AssistantBinding.identity(this.binding);
-    const value = JSON.stringify(identity);
+    const value = AssistantBinding.serialize(this.binding);
     this.database.prepare('INSERT OR IGNORE INTO bridge_binding VALUES (1, ?)').run(value);
     const row = this.database.prepare('SELECT value FROM bridge_binding WHERE id = 1').get();
-    const saved: unknown = JSON.parse(String(row?.value));
-
-    if (!Array.isArray(saved) || (saved.length !== 4 && saved.length !== 5))
-    {
-      throw new BridgeError('Stored bridge identity differs from configuration.');
-    }
-
-    const previous = saved.length === 5 ? [saved[0], saved[1], saved[3], saved[4]] : saved;
-    const previousValue = JSON.stringify(previous);
+    const saved = AssistantBinding.decode(String(row?.value));
+    const previous = saved.identity;
+    const sameIdentity = JSON.stringify(previous) === JSON.stringify(identity);
 
     if (previous[0] !== identity[0] || previous[1] !== identity[1] ||
-        (saved.length === 5 && (previousValue !== value || pendingCount)))
+        (saved.singleUser && (!sameIdentity || pendingCount)))
     {
       throw new BridgeError('Stored bridge identity differs from configuration or has pending pilot work.');
     }
@@ -67,14 +84,14 @@ export class AssistantBinding
       `).run(String(previous[2]));
     }
 
-    if (previousValue === value)
+    if (sameIdentity)
     {
       this.database.prepare('UPDATE bridge_binding SET value = ? WHERE id = 1').run(value);
       this.database.prepare('UPDATE assistant_state SET next_binding = NULL WHERE id = 1').run();
       return;
     }
 
-    if (this.state.next_binding !== value || pendingCount || unresolved)
+    if (this.state.nextBinding !== value || pendingCount || unresolved)
     {
       throw new BridgeError('Stored bridge identity differs from configuration.');
     }
@@ -86,7 +103,8 @@ export class AssistantBinding
   prepare(next: BridgeBinding, pendingCount: number, unresolved: number): void
   {
     if (next.sessionID !== this.binding.sessionID || next.accountID !== this.binding.accountID ||
-        next.recipientSessionID === next.sessionID || !next.recipientSessionID || !next.recipientAddress)
+        next.recipientSessionID === next.sessionID || !next.recipientSessionID || !next.recipientAddress ||
+        next.recipientAddress.split('/')[0] !== this.binding.recipientAddress.split('/')[0])
     {
       throw new BridgeError('Select a different assistant for the existing bridge identity.');
     }
@@ -97,7 +115,7 @@ export class AssistantBinding
     }
 
     this.database.prepare('UPDATE assistant_state SET next_binding = ? WHERE id = 1')
-      .run(JSON.stringify(AssistantBinding.identity(next)));
+      .run(AssistantBinding.serialize(next));
   }
 
   recordThread(threadID: string): void

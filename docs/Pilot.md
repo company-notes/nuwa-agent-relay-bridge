@@ -106,7 +106,7 @@ Stop the service, inspect its status and reconcile unresolved work.
 ./nuwa-bridge-linux-arm64.run status
 ```
 
-Status reports the Bridge address, designated assistant, access modes and pending, blocked and uncertain delivery counts. Back up the private data directory while stopped and restrict access to the backup. Download the new matching executable to a temporary filename, verify its checksum, make it executable and replace the installed executable. Start it using the same data directory. This retains the account, OAuth, policies and delivery history.
+Status reports the Bridge address, designated assistant, access modes and pending, blocked and uncertain delivery counts. Back up the private data directory while stopped and restrict access to the backup. Download the new matching executable to a temporary filename, verify its checksum, make it executable and replace the installed executable. Start it using the same data directory. This retains the account, OAuth, policies and delivery history. The database records its routing schema version; older executables cannot open the migrated identity. Keep the pre-upgrade backup for an authorized rollback.
 
 ### Change the designated assistant
 

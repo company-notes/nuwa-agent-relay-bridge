@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 
 import { Bridge } from '../src/Bridge.js';
@@ -135,6 +136,20 @@ class Scenario
   restart(): void
   {
     this.store.close();
+    this.store = this.open();
+    this.bridge = this.createBridge();
+  }
+
+  restartFromPreviousSchema(): void
+  {
+    this.store.close();
+    const database = new DatabaseSync(join(this.dir, 'delivery.sqlite3'));
+    database.exec('DROP TABLE assistant_state; DROP TABLE thread_assistants; DROP TABLE inbound_group_audiences;');
+    database.prepare('UPDATE bridge_binding SET value = ? WHERE id = 1').run(JSON.stringify([
+      this.binding.sessionID, this.binding.accountID, this.binding.recipientSessionID, this.binding.recipientAddress,
+    ]));
+    database.close();
+
     this.store = this.open();
     this.bridge = this.createBridge();
   }
@@ -632,4 +647,64 @@ test('a group message accepted for one audience is withheld after membership cha
 
   assert.equal(s.relay.submissions.length, 0);
   assert.equal(s.store.blocked, 1);
+});
+
+test('an installed bridge upgrades with existing private and group threads and cuts over without losing their history', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+
+  await s.request('before-private', 'Private report');
+  await s.groupRequest('before-group', 'company', 'employee', '@AI group report', true);
+  await s.bridge.cycle();
+
+  const privateThread = s.relay.submissions[0]!.thread;
+  const groupThread = s.relay.submissions[1]!.thread;
+  s.answer(privateThread, 'private-before');
+  s.answer(groupThread, 'group-before');
+  await s.bridge.cycle();
+
+  s.restartFromPreviousSchema();
+  await s.request('after-private', 'Private follow-up', 'line-1');
+  await s.groupRequest('after-group', 'company', 'employee', 'Group follow-up', false, 'line-2');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[2]!.thread, privateThread);
+  assert.equal(s.relay.submissions[3]!.thread, groupThread);
+
+  s.switchAssistant('ava-session', 'example/ava/main');
+  await s.request('new-private', 'Private hello');
+  await s.groupRequest('new-group', 'company', 'employee', 'Group hello');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[4]!.to, 'example/ava/main');
+  assert.equal(s.relay.submissions[5]!.to, 'example/ava/main');
+  assert.equal(new Set([privateThread, groupThread, s.relay.submissions[4]!.thread,
+    s.relay.submissions[5]!.thread]).size, 4);
+
+  s.answer(groupThread, 'former-group-reply');
+  await s.bridge.cycle();
+  assert.equal(s.messaging.deliveries.length, 2);
+  assert.equal(s.store.blockedOutbound, 1);
+});
+
+test('uncertain native delivery prevents switching to a different assistant', async t =>
+{
+  const s = new Scenario();
+  t.after(() => s.close());
+
+  await s.request('request', 'Prepare report');
+  await s.bridge.cycle();
+  s.answer(s.relay.submissions[0]!.thread);
+  s.messaging.failAfterSend = true;
+
+  await assert.rejects(s.bridge.cycle(), /uncertain native delivery/);
+  assert.throws(() => s.switchAssistant('ava-session', 'example/ava/main'), /uncertain native deliveries/);
+
+  await s.request('follow-up', 'Still waiting');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[1]!.thread, s.relay.submissions[0]!.thread);
+  assert.equal(s.store.unresolved, 1);
 });

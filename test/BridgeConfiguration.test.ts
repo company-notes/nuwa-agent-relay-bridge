@@ -83,4 +83,12 @@ test('interrupted assistant selection reconciles the durable switch intent with 
   store.close();
   assert.deepEqual(config.read(), next);
   assert.throws(() => new DeliveryStore(path, config.binding(initial)), /identity differs/);
+
+  const database = new DatabaseSync(path);
+  const row = database.prepare('SELECT value FROM bridge_binding WHERE id = 1').get();
+  const stored = JSON.parse(String(row?.value)) as { version: number; identity: string[] };
+  database.close();
+
+  assert.equal(stored.version, 2);
+  assert.deepEqual(stored.identity, ['bridge', 'line', 'ava', 'example/ava/main']);
 });
