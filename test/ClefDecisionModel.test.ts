@@ -35,6 +35,7 @@ test('a natural greeting traverses the authenticated Workers AI decision contrac
   assert.equal(request.url, 'https://api.cloudflare.com/client/v4/accounts/' + DecisionService.accountID + '/ai/run');
   assert.equal(request.options.method, 'POST');
   assert.equal(request.options.redirect, 'error');
+
   assert.equal(new Headers(request.options.headers).get('Authorization'), 'Bearer ' + DecisionService.token);
   assert.ok(request.options.signal instanceof AbortSignal);
 
@@ -42,6 +43,7 @@ test('a natural greeting traverses the authenticated Workers AI decision contrac
   assert.equal(body.model, '@cf/cloudflare/clef-flash');
   assert.equal(body.input.model, 'clef-flash');
   assert.equal(body.input.questions.addressed.type, 'noul');
+
   assert.match(body.input.state, /LATEST MESSAGE: Human 1: "妳好啊，改天一起吃飯"/);
   assert.ok(!JSON.stringify(body).includes(DecisionService.token));
 });
@@ -55,6 +57,7 @@ test('an unavailable or malformed decision service never supplies an activation 
   await assert.rejects(service.model.probabilityOfAddress(DecisionService.greeting), /^BridgeError: Workers AI request failed \(HTTP 429\)\.$/);
 
   service.status = 200;
+
   for (const response of [
     { success: false, result: { answers: { addressed: { type: 'noul', noul: 1 } } } },
     { success: true, result: { answers: { addressed: { type: 'choice', noul: 1 } } } },

@@ -65,6 +65,7 @@ export class BridgeConfiguration
     {
       GroupActivationPolicy.validate(config.conversation);
     }
+
     this.file.write(config);
   }
 

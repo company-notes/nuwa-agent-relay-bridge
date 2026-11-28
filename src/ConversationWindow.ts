@@ -48,6 +48,7 @@ export class ConversationWindow
 
       return speakers.get(id)!;
     };
+
     const history: ConversationTurn[] = this.entries.map(entry => ({ speaker: label(entry.senderID), text: entry.text }));
 
     return { assistantName, history, latest: { speaker: label(senderID), text } };

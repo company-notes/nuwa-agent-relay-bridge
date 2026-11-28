@@ -116,6 +116,7 @@ export class GroupActivationPolicy
     const eligible = !direct && !message.mentionsOther && !message.replyToID && candidate &&
       message.body.length <= ConversationWindow.maxText && this.clock() >= this.retryAt;
     const input = eligible ? window.snapshot(name, message.senderID, message.body) : undefined;
+
     window.append(message.body, this.clock(), message.senderID);
 
     if (direct)

@@ -13,6 +13,7 @@ export class ConversationSetup
   {
     console.log('Natural group conversation sends bounded recent text to Cloudflare Workers AI for addressee classification.');
     console.log('Selected groups must consent to cloud processing and contextual forwarding to the assistant.');
+
     const groups = await this.groups();
     groups.forEach((group, index) => console.log(`${index + 1}. ${group.name} (${group.memberIDs.length} members)`));
 

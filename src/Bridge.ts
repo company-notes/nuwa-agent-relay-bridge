@@ -195,6 +195,7 @@ export class Bridge
     const conversationID = route.conversationID;
     const groupID = ConversationAddress.groupID(conversationID);
     const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID);
+
     if (groupID !== undefined)
     {
       this.activation.observeAudience(groupID, audience);
@@ -230,6 +231,7 @@ export class Bridge
     {
       this.activation.recordReply(groupID, audience, message.body);
     }
+
     this.logger.info('/native/message/delivered', {
       native_message_id: nativeID, relay_message_id: message.id, relay_thread_id: message.threadId,
     });

@@ -792,6 +792,7 @@ test('a natural greeting follows the assistant introduction in the original grou
 
   s.answer(thread, 'greeting-answer');
   await s.bridge.cycle();
+
   assert.equal(s.messaging.deliveries.length, 2);
   assert.equal(s.messaging.deliveries[1]!.conversation, 'group:company');
 });
@@ -800,6 +801,7 @@ test('ordinary chatter, low-confidence decisions, duplicate messages and other g
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   await s.introduce();
 
   s.model.probability = 0.3;
@@ -824,6 +826,7 @@ test('an expired or changed audience loses natural conversation context and requ
   let now = 1000;
   const s = new NaturalConversationScenario(undefined, () => now);
   t.after(() => s.close());
+
   await s.introduce();
 
   now += 600_001;
@@ -850,6 +853,7 @@ test('a model outage keeps native mentions and private chats working without for
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   await s.introduce();
 
   s.model.fail = true;
@@ -868,6 +872,7 @@ test('revoked natural-conversation approval blocks a persisted contextual reques
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   await s.introduce();
 
   await s.groupRequest('pending-greeting', 'company', 'coworker', '妳好啊，改天一起吃飯');
@@ -889,6 +894,7 @@ test('a native mention of a different member is not overridden by semantic class
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   await s.introduce();
 
   await s.bridge.receive({ messageID: 'other-mention', conversationID: 'group:company',
@@ -924,9 +930,11 @@ test('short-term dialogue is bounded, uses local speaker labels, and does not in
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   await s.introduce();
 
   s.model.probability = 0.1;
+
   for (let i = 0; i < 22; i++)
   {
     await s.groupRequest('ambient-' + i, 'company', 'coworker', '文字' + i + 'x'.repeat(700));
@@ -948,6 +956,7 @@ test('model cooldown suppresses repeated failures and resumes natural classifica
   let now = 1000;
   const s = new NaturalConversationScenario(undefined, () => now);
   t.after(() => s.close());
+
   await s.introduce();
 
   s.model.fail = true;
