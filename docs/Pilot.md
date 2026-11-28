@@ -79,13 +79,13 @@ Join the company account to the desired LINE group using LINE. Run:
 ./nuwa-bridge-linux-arm64.run groups
 ```
 
-Choose Disabled, Open (all joined groups, with confirmation) or Allowlist (selected groups and approved current membership). The default is Disabled. Group access is independent of the private policy. Allowlist membership changes require approval through the same command. The Bridge verifies current membership before submitting a group request or delivering a reply.
+Choose Disabled, Open (all joined groups, with confirmation) or Allowlist (selected groups). The default is Disabled. Group access is independent of the private policy. Group settings follow the Group ID when people join or leave. The Bridge verifies its current membership before submitting a group request or delivering a reply.
 
-A verified group of two, including the Bridge, accepts ordinary incoming messages. In larger groups, a genuine native @Mention, @All or quote of the assistant's previous reply activates the assistant; unrelated chatter remains local. The Bridge verifies the audience at intake and before submission. See the [handoff](Handoff.md#group-activation-by-audience-size).
+A verified group of two, including the Bridge, accepts ordinary incoming messages. In larger groups, a genuine native @Mention, @All or quote of the assistant's previous reply activates the assistant; unrelated chatter remains local. The Bridge verifies the sender and its own membership at intake. See the [handoff](Handoff.md#group-activation-by-membership-size).
 
 ### Natural group conversation (optional)
 
-The `conversation` command enables semantic activation for selected authorized groups and their current member sets. Obtain the members' consent to send bounded group dialogue to Cloudflare Workers AI and to include recent group dialogue as context in accepted Relay requests. This is separate from group access. Existing approved groups retain their settings; new groups use explicit activation until configured. Inform members of the seven-day local dialogue retention before using natural conversation.
+The `conversation` command enables semantic activation for selected groups. Explain that bounded dialogue is sent to Cloudflare Workers AI for addressee classification, may be included in accepted Relay requests, and is retained locally for up to seven days. This is a per-group feature setting. Members may join or leave without repeating setup. New groups use explicit activation until the feature is enabled.
 
 Create a dedicated Cloudflare API token scoped to the intended account and Workers AI inference permission. Keep the token private. Set the credentials in the service environment:
 
@@ -97,11 +97,11 @@ export CLOUDFLARE_API_TOKEN
 ./nuwa-bridge-linux-arm64.run conversation
 ```
 
-Select the group numbers, enter the assistant's visible chat name (for example `小媧`), and confirm member consent. An empty selection disables the feature. Reconfigure after approving a new membership set.
+Select the group numbers, enter the assistant's visible chat name (for example `小媧`), and confirm the selected feature settings. An empty selection disables the feature.
 
 Start the Bridge from the same environment. For the supplied systemd unit, place the two credential assignments in a private, mode-0600 `~/.config/nuwa-agent-relay-bridge/decision.env` file, reload the unit and start the service. For a custom service data directory, set its EnvironmentFile accordingly. Use a locally trusted editor; never put the token in Git, terminal history or logs.
 
-The model receives bounded text, observation timestamps and conversation-local speaker labels. Native ID fields and attachment links stay local. In approved groups, the Bridge stores up to 30 turns from the last seven days in its private SQLite database, with a 500-character bound per turn and at most 64 group windows. Restart preserves the window for the same approved audience and assistant generation. Expired window entries are removed during operation and at startup; observed membership changes, revoked consent and assistant switching remove affected dialogue. Keep database backups protected and apply the same retention policy to them. Accepted semantic requests persist their dialogue snapshot as part of normal delivery history, independently of the rolling window.
+The model receives bounded text, observation timestamps and conversation-local speaker labels. Native ID fields and attachment links stay local. In groups with natural conversation enabled, the Bridge stores up to 30 turns from the last seven days in its private SQLite database, with a 500-character bound per turn and at most 64 group windows. Restart and member changes preserve the window for the same Group ID and assistant generation. Expired window entries are removed during operation and at startup; disabling the feature, removing group access or switching assistants removes affected dialogue. Keep database backups protected and apply the same retention policy to them. Accepted semantic requests persist their dialogue snapshot as part of normal delivery history, independently of the rolling window.
 
 Explicit native mentions, @All, assistant quotes, private chats and two-member chats bypass inference. When the assistant has spoken anywhere in the retained window or its configured name appears in a short text message, Clef-flash may classify the message. It receives timestamps and intervening conversation, so it can assess a natural reply hours or days later. A probability of at least 0.8 activates the assistant. Explicit mentions of other members and replies addressed elsewhere do not use semantic activation. Ambiguous messages remain local. On model failure or missing credentials, explicit activation continues; failures enter a 30-second inference cooldown.
 
@@ -118,7 +118,7 @@ Use ordinary private chat or the supported group trigger. Replies arrive in the 
 | Follow up in the same chat | Continue its active Relay Thread. |
 | Quote an earlier assistant reply | Select that reply's original Relay Thread. |
 | Send `/new <message>` | Create a separate Relay Thread (use a valid group trigger in a group). |
-| Change a group's membership | Start a new audience-specific thread after authorization. |
+| Change a group's membership | Continue the existing group conversation and settings. |
 
 The assistant receives text and supported sticker artifact links. Private media currently produces a type notice. AI context and tool permissions depend on the receiving platform; verify isolation for every intended participant.
 
@@ -130,7 +130,7 @@ Stop the service, inspect its status and reconcile unresolved work.
 ./nuwa-bridge-linux-arm64.run status
 ```
 
-Status reports the Bridge address, designated assistant, access modes and pending, blocked and uncertain delivery counts. Back up the private data directory while stopped and restrict access to the backup. Download the new matching executable to a temporary filename, verify its checksum, make it executable and replace the installed executable. Start it using the same data directory. This retains the account, OAuth, policies and delivery history. The database records its routing schema version; older executables cannot open the migrated identity. Keep the pre-upgrade backup for an authorized rollback.
+Status reports the Bridge address, designated assistant, access modes and pending, blocked and uncertain delivery counts. Back up the private data directory while stopped and restrict access to the backup. Download the new matching executable to a temporary filename, verify its checksum, make it executable and replace the installed executable. Start it using the same data directory. This retains the account, OAuth, policies and delivery history. Upgrades from roster-based settings retain enabled Group IDs without repeating setup. The database records its routing schema version; older executables cannot open the migrated identity. Keep the pre-upgrade backup for an authorized rollback.
 
 ### Change the designated assistant
 
@@ -157,13 +157,13 @@ Enable user lingering with `sudo loginctl enable-linger "$USER"` when the host s
 
 ## 7. Verify operation and diagnose failures
 
-Send a permitted request and observe an actual reply in the original LINE conversation. Follow up and verify the same Relay Thread; use a second authorized chat and interleave replies. For a two-member group, send an ordinary message. For a larger group, verify ambient chatter remains local, then use a native mention, @All and a quote of the reply. Verify excluded chats and changed group audiences are protected. See [TESTING.md](../TESTING.md) for the complete acceptance scope.
+Send a permitted request and observe an actual reply in the original LINE conversation. Follow up and verify the same Relay Thread; use a second authorized chat and interleave replies. For a two-member group, send an ordinary message. For a larger group, verify ambient chatter remains local, then use a native mention, @All and a quote of the reply. Verify excluded chats stay excluded, ordinary group membership changes preserve conversation, and a departed Bridge stops sending to the group. See [TESTING.md](../TESTING.md) for the complete acceptance scope.
 
 | Log or evidence | Meaning |
 | --- | --- |
 | `/native/message/received` | Bridge accepted a native event for processing. |
 | `/group/roster/verified` | Native group ID and actual membership were verified. |
-| `/group/conversation/skipped` | A semantic candidate was skipped; the reason identifies approval, addressing, model availability, message size or missing assistant context. |
+| `/group/conversation/skipped` | A semantic candidate was skipped; the reason identifies feature enablement, addressing, model availability, message size or missing assistant context. |
 | `/group/conversation/decided` | Model decision with probability and inference elapsed milliseconds; no dialogue text. |
 | `/group/conversation/failed`, `/group/conversation/disabled` | Explicit activation remains available; inspect credentials or model availability. |
 | `/relay/message/submitted` | Relay accepted the message and returned Message and Thread IDs. |

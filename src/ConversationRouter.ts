@@ -6,24 +6,19 @@ export class ConversationRouter
 {
   constructor(private readonly store: DeliveryStore) {}
 
-  plan(message: InboundRecord, audience?: string): SubmissionPlan | undefined
+  plan(message: InboundRecord): SubmissionPlan | undefined
   {
     const existing = this.store.submissionPlan(message.messageID);
 
     if (existing)
     {
-      return existing.audience === audience ? existing : undefined;
+      return existing;
     }
 
     const newTopic = /^\/new\s+\S/i.test(message.body);
-    let route = newTopic ? undefined : message.replyToID
+    const route = newTopic ? undefined : message.replyToID
       ? this.store.findQuote(message.replyToID, message.conversationID)
       : this.store.currentThread(message.conversationID);
-
-    if (route && audience !== undefined && this.store.threadAudience(route.threadID) !== audience)
-    {
-      route = undefined;
-    }
 
     if (!newTopic && message.replyToID && !route)
     {
@@ -41,7 +36,6 @@ export class ConversationRouter
       threadID: route?.threadID ?? null, replyMessageID: route?.replyMessageID ?? null,
       body,
       artifactLinks: message.artifactLinks ?? [],
-      ...(audience !== undefined ? { audience } : {}),
     };
 
     this.store.savePlan(message.messageID, plan);

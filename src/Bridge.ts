@@ -45,14 +45,12 @@ export class Bridge
     }
 
     const groupID = ConversationAddress.groupID(message.conversationID);
-    let receivedAudience: string | undefined;
     let context: string | undefined;
 
     if (groupID !== undefined)
     {
       if (!this.groupPolicy.accepts(groupID))
       {
-        this.activation.observeAudience(groupID);
         return false;
       }
 
@@ -70,16 +68,15 @@ export class Bridge
         message = { ...message, replyToID: undefined };
       }
 
-      const audience = await this.groupPolicy.audience(groupID, message.senderID);
-      if (!audience)
+      const membership = await this.groupPolicy.membership(groupID, message.senderID);
+      if (!membership)
       {
-        this.activation.observeAudience(groupID);
         this.store.reject(message);
         this.logger.info('/native/message/blocked', { native_message_id: message.messageID });
         return false;
       }
 
-      const activation = await this.activation.activate(groupID, audience, message, addressed);
+      const activation = await this.activation.activate(groupID, membership, message, addressed);
 
       if (!activation)
       {
@@ -87,7 +84,6 @@ export class Bridge
         return false;
       }
 
-      receivedAudience = audience.fingerprint;
       context = activation.context;
     }
     else if (message.senderID !== message.conversationID || !this.policy.accepts(message.senderID))
@@ -95,7 +91,7 @@ export class Bridge
       return false;
     }
 
-    if (this.store.accept(message, receivedAudience, context))
+    if (this.store.accept(message, context))
     {
       this.logger.info('/native/message/received', { native_message_id: message.messageID });
     }
@@ -108,13 +104,8 @@ export class Bridge
     for (const message of this.store.pending())
     {
       const groupID = ConversationAddress.groupID(message.conversationID);
-      const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID, message.senderID);
-      const permitted = groupID === undefined ? await this.policy.permits(message.senderID) : audience !== undefined;
-
-      if (groupID !== undefined)
-      {
-        this.activation.observeAudience(groupID, audience);
-      }
+      const membership = groupID === undefined ? undefined : await this.groupPolicy.membership(groupID);
+      const permitted = groupID === undefined ? await this.policy.permits(message.senderID) : membership !== undefined;
 
       if (!permitted)
       {
@@ -123,26 +114,17 @@ export class Bridge
         continue;
       }
 
-      if (message.receivedAudience !== undefined && message.receivedAudience !== audience?.fingerprint)
-      {
-        this.store.block(message.messageID);
-        this.logger.info('/native/message/blocked', {
-          native_message_id: message.messageID, reason: 'audience_changed_before_submission',
-        });
-        continue;
-      }
-
       if (message.context !== undefined &&
-          (groupID === undefined || !this.activation.authorizesContext(groupID, audience)))
+          (groupID === undefined || !this.activation.authorizesContext(groupID)))
       {
         this.store.block(message.messageID);
         this.logger.info('/native/message/blocked', {
-          native_message_id: message.messageID, reason: 'conversation_approval_revoked',
+          native_message_id: message.messageID, reason: 'conversation_disabled',
         });
         continue;
       }
 
-      const plan = this.router.plan(message, audience?.fingerprint);
+      const plan = this.router.plan(message);
 
       if (!plan)
       {
@@ -161,7 +143,7 @@ export class Bridge
         throw new BridgeError('Invalid Relay submission correlation.');
       }
 
-      this.store.recordSubmission(message, result, plan.audience);
+      this.store.recordSubmission(message, result);
       this.logger.info('/relay/message/submitted', {
         native_message_id: message.messageID, relay_message_id: result.messageId, relay_thread_id: result.threadId,
       });
@@ -193,16 +175,11 @@ export class Bridge
 
     const conversationID = route.conversationID;
     const groupID = ConversationAddress.groupID(conversationID);
-    const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID);
-
-    if (groupID !== undefined)
-    {
-      this.activation.observeAudience(groupID, audience);
-    }
+    const membership = groupID === undefined ? undefined : await this.groupPolicy.membership(groupID);
 
     const permitted = groupID === undefined
       ? await this.policy.permits(conversationID)
-      : audience !== undefined && audience.fingerprint === this.store.threadAudience(message.threadId);
+      : membership !== undefined;
 
     if (!permitted)
     {
@@ -226,9 +203,9 @@ export class Bridge
 
     this.store.recordDelivery(message, conversationID, nativeID);
 
-    if (groupID !== undefined && audience)
+    if (groupID !== undefined)
     {
-      this.activation.recordReply(groupID, audience, message.body, nativeID);
+      this.activation.recordReply(groupID, message.body, nativeID);
     }
 
     this.logger.info('/native/message/delivered', {

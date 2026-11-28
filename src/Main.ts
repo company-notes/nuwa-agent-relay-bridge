@@ -258,7 +258,7 @@ class Application
 
       try
       {
-        store.conversationHistory.reconcile(GroupActivationPolicy.approvedAudiences(config.conversation,
+        store.conversationHistory.reconcile(GroupActivationPolicy.enabledGroups(config.conversation,
           config.groups ?? GroupPolicy.disabled));
         store.conversationHistory.prune(Date.now());
         this.config.write(config);
@@ -368,7 +368,7 @@ class Application
       console.log('Designated assistant:', config.recipient_address);
       console.log('Access mode:', AccessMode[config.access.mode]);
       console.log('Group mode:', GroupMode[(config.groups ?? GroupPolicy.disabled).mode]);
-      console.log('Natural conversation approved groups:', config.conversation?.approved_groups.length ?? 0);
+      console.log('Natural conversation enabled groups:', config.conversation?.approved_groups.length ?? 0);
       console.log('Pending inbound submissions:', store.pendingCount);
       console.log('Blocked inbound messages:', store.blocked);
       console.log('Blocked outbound replies:', store.blockedOutbound);

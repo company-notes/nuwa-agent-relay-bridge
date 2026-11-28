@@ -26,7 +26,7 @@ export class AssistantBinding
 
   private static serialize(binding: BridgeBinding): string
   {
-    return JSON.stringify({ version: 2, identity: AssistantBinding.identity(binding) });
+    return JSON.stringify({ version: 3, identity: AssistantBinding.identity(binding) });
   }
 
   private static decode(value: string): { identity: StoredIdentity; singleUser: boolean }
@@ -35,7 +35,7 @@ export class AssistantBinding
     const singleUser = Array.isArray(saved) && saved.length === 5;
     const identity: unknown = Array.isArray(saved)
       ? (singleUser ? [saved[0], saved[1], saved[3], saved[4]] : saved)
-      : saved && typeof saved === 'object' && 'version' in saved && saved.version === 2 && 'identity' in saved
+      : saved && typeof saved === 'object' && 'version' in saved && (saved.version === 2 || saved.version === 3) && 'identity' in saved
         ? saved.identity : undefined;
 
     if (!Array.isArray(identity) || identity.length !== 4 ||
@@ -93,7 +93,9 @@ export class AssistantBinding
       return;
     }
 
-    if (this.state.nextBinding !== value || pendingCount || unresolved)
+    const next = this.state.nextBinding;
+
+    if (!next || JSON.stringify(AssistantBinding.decode(next).identity) !== JSON.stringify(identity) || pendingCount || unresolved)
     {
       throw new BridgeError('Stored bridge identity differs from configuration.');
     }

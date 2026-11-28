@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { BridgeError } from './BridgeError.js';
 import { Logger } from './Logger.js';
 import type { MessagingBackend } from './Contracts.js';
@@ -14,7 +12,6 @@ export enum GroupMode
 export interface GroupApproval
 {
   id: string;
-  member_ids: string[];
 }
 
 export interface GroupSettings
@@ -23,49 +20,46 @@ export interface GroupSettings
   approved_groups: GroupApproval[];
 }
 
-export interface GroupAudience
+export interface GroupMembership
 {
-  fingerprint: string;
   memberCount: number;
 }
 
 export class GroupPolicy
 {
   static readonly disabled: GroupSettings = { mode: GroupMode.Disabled, approved_groups: [] };
-  private readonly approvals: Map<string, Set<string>>;
+  private readonly approvals: Set<string>;
   private readonly logger = new Logger('group-policy');
 
   constructor(readonly settings: GroupSettings, private readonly backend: MessagingBackend,
     private readonly accountID: string)
   {
     GroupPolicy.validate(settings);
-    this.approvals = new Map(settings.approved_groups.map(group => [group.id, new Set(group.member_ids)]));
+    this.approvals = new Set(settings.approved_groups.map(group => group.id));
   }
 
   static validate(settings: GroupSettings): void
   {
     if (!settings || ![GroupMode.Disabled, GroupMode.Open, GroupMode.Allowlist].includes(settings.mode) ||
         !Array.isArray(settings.approved_groups) ||
-        settings.approved_groups.some(group => !group || typeof group.id !== 'string' || !group.id ||
-          !Array.isArray(group.member_ids) || !group.member_ids.length ||
-          group.member_ids.some(id => typeof id !== 'string' || !id)))
+        settings.approved_groups.some(group => !group || typeof group.id !== 'string' || !group.id))
     {
       throw new BridgeError('Invalid group access policy.');
     }
   }
 
-  static fingerprint(members: Iterable<string>): string
+  static allows(groupID: string, mode: GroupMode, selected: ReadonlySet<string>): boolean
   {
-    return createHash('sha256').update(JSON.stringify([...new Set(members)].sort())).digest('hex');
+    return Boolean(groupID) && (mode === GroupMode.Open ||
+      (mode === GroupMode.Allowlist && selected.has(groupID)));
   }
 
   accepts(groupID: string): boolean
   {
-    return Boolean(groupID) && (this.settings.mode === GroupMode.Open ||
-      (this.settings.mode === GroupMode.Allowlist && this.approvals.has(groupID)));
+    return GroupPolicy.allows(groupID, this.settings.mode, this.approvals);
   }
 
-  async audience(groupID: string, senderID?: string): Promise<GroupAudience | undefined>
+  async membership(groupID: string, senderID?: string): Promise<GroupMembership | undefined>
   {
     if (!this.accepts(groupID))
     {
@@ -90,17 +84,6 @@ export class GroupPolicy
       return undefined;
     }
 
-    const current = new Set(members);
-    const approved = this.approvals.get(groupID);
-
-    if (this.settings.mode === GroupMode.Allowlist &&
-        (!approved || approved.size !== current.size || [...current].some(id => !approved.has(id))))
-    {
-      this.logger.info('/group/access/rejected', { reason: 'roster_changed', member_count: current.size });
-      return undefined;
-    }
-
-    return { fingerprint: GroupPolicy.fingerprint(current),
-      memberCount: current.size };
+    return { memberCount: new Set(members).size };
   }
 }

@@ -10,7 +10,7 @@ export class ConversationHistory
   {
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS group_dialogue (
-        sequence INTEGER PRIMARY KEY, group_id TEXT NOT NULL, audience TEXT NOT NULL,
+        sequence INTEGER PRIMARY KEY, group_id TEXT NOT NULL,
         generation INTEGER NOT NULL, native_id TEXT NOT NULL, sender_id TEXT,
         text TEXT NOT NULL, observed_at INTEGER NOT NULL,
         UNIQUE (generation, group_id, native_id)
@@ -18,34 +18,29 @@ export class ConversationHistory
       CREATE INDEX IF NOT EXISTS group_dialogue_scope ON group_dialogue(generation, group_id, sequence);
       CREATE INDEX IF NOT EXISTS group_dialogue_age ON group_dialogue(observed_at);
     `);
+    const columns = this.database.prepare('PRAGMA table_info(group_dialogue)').all();
+
+    if (columns.some(column => column.name === 'audience'))
+    {
+      this.database.exec('ALTER TABLE group_dialogue DROP COLUMN audience');
+    }
+
     this.database.prepare('DELETE FROM group_dialogue WHERE generation <> ?').run(this.generation);
   }
 
-  reconcile(approvals: ReadonlyMap<string, string>): void
+  reconcile(enabled: ReadonlySet<string>): void
   {
-    const scopes = this.database.prepare('SELECT DISTINCT group_id AS groupID, audience FROM group_dialogue').all();
+    const groups = this.database.prepare('SELECT DISTINCT group_id AS groupID FROM group_dialogue').all();
 
-    for (const scope of scopes)
+    for (const group of groups)
     {
-      const groupID = String(scope.groupID);
+      const groupID = String(group.groupID);
 
-      if (approvals.get(groupID) !== scope.audience)
+      if (!enabled.has(groupID))
       {
-        this.database.prepare('DELETE FROM group_dialogue WHERE group_id = ? AND audience = ?')
-          .run(groupID, String(scope.audience));
+        this.database.prepare('DELETE FROM group_dialogue WHERE group_id = ?').run(groupID);
       }
     }
-  }
-
-  observeAudience(groupID: string, audience?: string): void
-  {
-    if (audience === undefined)
-    {
-      this.database.prepare('DELETE FROM group_dialogue WHERE group_id = ?').run(groupID);
-      return;
-    }
-
-    this.database.prepare('DELETE FROM group_dialogue WHERE group_id = ? AND audience <> ?').run(groupID, audience);
   }
 
   prune(now: number): void
@@ -53,13 +48,13 @@ export class ConversationHistory
     this.database.prepare('DELETE FROM group_dialogue WHERE observed_at <= ?').run(now - ConversationWindow.ttl);
   }
 
-  window(groupID: string, audience: string, nativeID: string): ConversationWindow
+  window(groupID: string, nativeID: string): ConversationWindow
   {
     const entries = this.database.prepare(`
       SELECT sender_id AS senderID, text, observed_at AS time FROM group_dialogue
-      WHERE generation = ? AND group_id = ? AND audience = ? AND native_id <> ?
+      WHERE generation = ? AND group_id = ? AND native_id <> ?
       ORDER BY sequence DESC LIMIT ?
-    `).all(this.generation, groupID, audience, nativeID, ConversationWindow.maxTurns).reverse().map(row => ({
+    `).all(this.generation, groupID, nativeID, ConversationWindow.maxTurns).reverse().map(row => ({
       text: String(row.text), time: Number(row.time),
       ...(row.senderID === null ? {} : { senderID: String(row.senderID) }),
     } satisfies WindowEntry));
@@ -67,13 +62,13 @@ export class ConversationHistory
     return new ConversationWindow(entries);
   }
 
-  append(groupID: string, audience: string, nativeID: string, text: string, time: number, senderID?: string): void
+  append(groupID: string, nativeID: string, text: string, time: number, senderID?: string): void
   {
     this.database.prepare(`
       INSERT OR IGNORE INTO group_dialogue
-        (group_id, audience, generation, native_id, sender_id, text, observed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(groupID, audience, this.generation, nativeID, senderID ?? null, ConversationWindow.boundedText(text), time);
+        (group_id, generation, native_id, sender_id, text, observed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(groupID, this.generation, nativeID, senderID ?? null, ConversationWindow.boundedText(text), time);
 
     this.database.prepare(`
       DELETE FROM group_dialogue WHERE group_id = ? AND sequence NOT IN

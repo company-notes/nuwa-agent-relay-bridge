@@ -13,7 +13,7 @@ export class GroupSetup
   {
     console.log('1. Disabled: private chats only');
     console.log('2. Open: all joined LINE groups');
-    console.log('3. Allowlist: selected joined LINE groups with approved membership');
+    console.log('3. Allowlist: selected joined LINE groups');
     console.log('Two-member groups accept ordinary messages. Larger groups use @Mention, @All or an assistant quote.');
     console.log('Group replies are visible to every member. Use an assistant with group-safe tools, data and memory.');
 
@@ -47,7 +47,7 @@ export class GroupSetup
 
     return {
       mode: GroupMode.Allowlist,
-      approved_groups: selected.map(group => ({ id: group.id, member_ids: group.memberIDs })),
+      approved_groups: selected.map(group => ({ id: group.id })),
     };
   }
 }
