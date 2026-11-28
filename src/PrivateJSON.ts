@@ -36,6 +36,7 @@ export class PrivateJSON
       }
 
       renameSync(temporary, this.path);
+
       const directory = openSync(dirname(this.path), 'r');
 
       try

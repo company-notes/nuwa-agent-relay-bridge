@@ -122,6 +122,7 @@ export class DeliveryStore
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(message.messageID, message.conversationID, message.senderID, message.body,
         message.replyToID ?? null, randomUUID(), state);
+
       accepted = Number(result.changes) === 1;
 
       if (accepted && receivedAudience !== undefined)

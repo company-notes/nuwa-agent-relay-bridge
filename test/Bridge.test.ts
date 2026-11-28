@@ -143,6 +143,7 @@ class Scenario
   restartFromPreviousSchema(): void
   {
     this.store.close();
+
     const database = new DatabaseSync(join(this.dir, 'delivery.sqlite3'));
     database.exec('DROP TABLE assistant_state; DROP TABLE thread_assistants; DROP TABLE inbound_group_audiences;');
     database.prepare('UPDATE bridge_binding SET value = ? WHERE id = 1').run(JSON.stringify([
@@ -536,6 +537,7 @@ test('an authorized two-member group chats normally and a larger group only forw
 
   await s.groupRequest('follow-up', 'company', 'employee', 'What about tomorrow?');
   await s.bridge.cycle();
+
   assert.equal(s.relay.submissions[1]!.thread, firstThread);
 
   s.messaging.groups.set('company', ['company-line', 'employee', 'coworker']);
@@ -585,6 +587,7 @@ test('switching the assistant preserves the account, starts new conversations an
 
   await s.request('ava-follow-up', 'Tomorrow?', 'line-2');
   await s.bridge.cycle();
+
   assert.equal(s.relay.submissions[2]!.thread, ava.thread);
 
   s.switchAssistant('assistant-session', 'example/may/main');
@@ -624,6 +627,7 @@ test('unaddressed large-group chatter stays local even when the audience shrinks
 
   s.messaging.groups.set('company', ['company-line', 'employee']);
   await s.bridge.cycle();
+
   assert.equal(s.relay.submissions.length, 0);
 
   await s.groupRequest('ambient', 'company', 'employee', 'Lunch?');
@@ -653,6 +657,7 @@ test('an installed bridge upgrades with existing private and group threads and c
 {
   const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
   t.after(() => s.close());
+
   s.messaging.groups.set('company', ['company-line', 'employee']);
 
   await s.request('before-private', 'Private report');
@@ -685,6 +690,7 @@ test('an installed bridge upgrades with existing private and group threads and c
 
   s.answer(groupThread, 'former-group-reply');
   await s.bridge.cycle();
+
   assert.equal(s.messaging.deliveries.length, 2);
   assert.equal(s.store.blockedOutbound, 1);
 });

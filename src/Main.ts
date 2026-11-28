@@ -102,7 +102,9 @@ class Application
   private async configureAssistant(): Promise<void>
   {
     const config = this.config.read();
+
     await this.relay.verifyIdentity(config.session_id, config.canonical);
+
     const input = createInterface({ input: process.stdin, output: process.stdout });
 
     try
@@ -142,6 +144,7 @@ class Application
 
       const switched = new DeliveryStore(path, this.config.binding(next));
       switched.close();
+
       console.log('Designated assistant:', next.recipient_address);
       this.printStart();
     }
@@ -237,6 +240,7 @@ class Application
         {
           receiveFailure = error;
           Application.logger.failure('native_receive_failed', error);
+
           stop();
         });
         console.log('Bridge running:', config.canonical);

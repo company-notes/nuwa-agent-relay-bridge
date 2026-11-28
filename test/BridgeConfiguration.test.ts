@@ -54,6 +54,7 @@ test('interrupted assistant selection reconciles the durable switch intent with 
 {
   const directory = mkdtempSync(join(tmpdir(), 'bridge-switch-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
+
   const path = join(directory, 'delivery.sqlite3');
   const config = new BridgeConfiguration(new PrivateJSON(join(directory, 'config.json')));
   const initial = {
@@ -62,6 +63,7 @@ test('interrupted assistant selection reconciles the durable switch intent with 
     access: { mode: AccessMode.Friends, allowed_user_ids: [] }, groups: GroupPolicy.disabled,
   };
   const next = { ...initial, recipient_session_id: 'ava', recipient_address: 'example/ava/main' };
+
   config.write(initial);
 
   let store = new DeliveryStore(path, config.binding(initial));
@@ -71,6 +73,7 @@ test('interrupted assistant selection reconciles the durable switch intent with 
   // Interruption before the config rename retains the current assistant.
   store = new DeliveryStore(path, config.binding(config.read()));
   store.close();
+
   assert.throws(() => new DeliveryStore(path, config.binding(next)), /identity differs/);
 
   store = new DeliveryStore(path, config.binding(initial));

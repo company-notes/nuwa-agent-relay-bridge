@@ -49,7 +49,6 @@ export class Bridge
 
       const quote = message.replyToID ? this.store.findQuote(message.replyToID, message.conversationID) : undefined;
       const quotesAssistant = Boolean(quote?.replyMessageID);
-
       const addressed = Boolean(message.mentionsAccount || quotesAssistant);
 
       if (message.replyToID && !quote)

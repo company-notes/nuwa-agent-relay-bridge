@@ -62,8 +62,10 @@ export class AssistantBinding
   {
     const identity = AssistantBinding.identity(this.binding);
     const value = AssistantBinding.serialize(this.binding);
+
     this.database.prepare('INSERT OR IGNORE INTO bridge_binding VALUES (1, ?)').run(value);
     const row = this.database.prepare('SELECT value FROM bridge_binding WHERE id = 1').get();
+
     const saved = AssistantBinding.decode(String(row?.value));
     const previous = saved.identity;
     const sameIdentity = JSON.stringify(previous) === JSON.stringify(identity);
