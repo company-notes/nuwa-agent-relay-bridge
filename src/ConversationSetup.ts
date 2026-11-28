@@ -12,7 +12,7 @@ export class ConversationSetup
   async select(previous?: ConversationSettings): Promise<ConversationSettings | undefined>
   {
     console.log('Natural group conversation sends bounded recent text to Cloudflare Workers AI for addressee classification.');
-    console.log('Selected groups must consent to cloud processing and contextual forwarding to the assistant.');
+    console.log('Selected groups must consent to cloud processing, contextual forwarding and local retention of up to 30 recent turns for seven days.');
 
     const groups = await this.groups();
     groups.forEach((group, index) => console.log(`${index + 1}. ${group.name} (${group.memberIDs.length} members)`));

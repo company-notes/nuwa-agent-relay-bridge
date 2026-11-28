@@ -82,7 +82,7 @@ export class GroupActivationPolicy
 
   observeAudience(groupID: string, audience?: GroupAudience): void
   {
-    this.history.observeAudience(groupID, this.authorizesContext(groupID, audience) ? audience!.fingerprint : undefined);
+    this.history.observeAudience(groupID, this.authorizesContext(groupID, audience) ? audience?.fingerprint : undefined);
   }
 
   async activate(groupID: string, audience: GroupAudience, message: NativeMessage, addressed: boolean): Promise<Activation | undefined>
@@ -98,11 +98,11 @@ export class GroupActivationPolicy
     const name = this.settings!.assistant_name;
     const now = this.clock();
     this.history.prune(now);
-    const window = this.history.window(groupID, audience.fingerprint, message.messageID);
+    const window = direct ? undefined : this.history.window(groupID, audience.fingerprint, message.messageID);
 
     this.history.append(groupID, audience.fingerprint, message.messageID, message.body, now, message.senderID);
 
-    if (direct)
+    if (!window)
     {
       return {};
     }
@@ -151,7 +151,7 @@ export class GroupActivationPolicy
         return undefined;
       }
 
-      return { context: JSON.stringify({ history: input.history, currentSpeaker: input.latest.speaker }) };
+      return { context: JSON.stringify({ history: input.history, currentSpeaker: input.latest.speaker, currentTime: input.latest.time }) };
     }
     catch (error)
     {

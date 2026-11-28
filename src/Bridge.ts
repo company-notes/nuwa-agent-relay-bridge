@@ -71,10 +71,9 @@ export class Bridge
       }
 
       const audience = await this.groupPolicy.audience(groupID, message.senderID);
-      this.activation.observeAudience(groupID, audience);
-
       if (!audience)
       {
+        this.activation.observeAudience(groupID);
         this.store.reject(message);
         this.logger.info('/native/message/blocked', { native_message_id: message.messageID });
         return false;

@@ -21,6 +21,7 @@ import { ProcessLock } from './ProcessLock.js';
 import { RemoteRelayClient } from './RemoteRelayClient.js';
 import { GroupActivationPolicy } from './GroupActivationPolicy.js';
 import { ClefDecisionModel } from './ClefDecisionModel.js';
+import type { ConversationDecision } from './ConversationDecision.js';
 import { ConversationSetup } from './ConversationSetup.js';
 
 class Application
@@ -224,15 +225,18 @@ class Application
       return new GroupActivationPolicy(history, groups, settings);
     }
 
+    let decision: ConversationDecision | undefined;
+
     try
     {
-      return new GroupActivationPolicy(history, groups, settings, new ClefDecisionModel(accountID, token));
+      decision = new ClefDecisionModel(accountID, token);
     }
     catch (error)
     {
       Application.logger.failure('/group/conversation/disabled', error);
-      return new GroupActivationPolicy(history, groups, settings);
     }
+
+    return new GroupActivationPolicy(history, groups, settings, decision);
   }
 
   private async configurePolicy(update: (config: BridgeConfig, line: LineBackend, input: Interface) => Promise<void>): Promise<void>
@@ -255,6 +259,7 @@ class Application
       {
         store.conversationHistory.reconcile(GroupActivationPolicy.approvedAudiences(config.conversation,
           config.groups ?? GroupPolicy.disabled));
+        store.conversationHistory.prune(Date.now());
         this.config.write(config);
       }
       finally

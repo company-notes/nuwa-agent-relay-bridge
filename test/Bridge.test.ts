@@ -198,6 +198,20 @@ class Scenario
     });
   }
 
+  dialogueCount(): number
+  {
+    const database = new DatabaseSync(join(this.dir, 'delivery.sqlite3'), { readOnly: true });
+
+    try
+    {
+      return Number(database.prepare('SELECT COUNT(*) AS total FROM group_dialogue').get()!.total);
+    }
+    finally
+    {
+      database.close();
+    }
+  }
+
   close(): void
   {
     this.store.close();
@@ -879,6 +893,7 @@ test('revoked natural-conversation approval blocks a persisted contextual reques
   assert.equal(s.store.pendingCount, 1);
 
   s.revokeConversationApproval();
+  assert.equal(s.dialogueCount(), 0);
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 1);
@@ -1033,11 +1048,32 @@ test('the former assistant dialogue cannot return after switching away and back'
   await s.introduce();
 
   s.switchAssistant('ava-session', 'example/ava/main');
+  assert.equal(s.dialogueCount(), 0);
   await s.groupRequest('after-switch', 'company', 'employee', '妳尾牙想吃什麼？');
   await s.bridge.cycle();
 
   s.switchAssistant('assistant-session', 'example/may/main');
   await s.groupRequest('after-switch-back', 'company', 'employee', '妳好啊');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 0);
+  assert.equal(s.relay.submissions.length, 1);
+});
+
+test('expired group dialogue is removed on startup even without new incoming messages', async t =>
+{
+  let now = Date.parse('2026-11-28T01:00:00Z');
+  const s = new NaturalConversationScenario(undefined, () => now);
+  t.after(() => s.close());
+  await s.introduce();
+
+  assert.equal(s.dialogueCount(), 2);
+
+  now += 7 * 24 * 60 * 60 * 1000 + 1;
+  s.restart();
+
+  assert.equal(s.dialogueCount(), 0);
+  await s.groupRequest('after-expiry', 'company', 'employee', '妳好啊');
   await s.bridge.cycle();
 
   assert.equal(s.model.inputs.length, 0);

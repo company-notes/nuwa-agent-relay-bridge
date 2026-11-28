@@ -85,7 +85,7 @@ A verified group of two, including the Bridge, accepts ordinary incoming message
 
 ### Natural group conversation (optional)
 
-The `conversation` command enables semantic activation for selected authorized groups and their current member sets. Obtain the members' consent to send bounded group dialogue to Cloudflare Workers AI and to include recent group dialogue as context in accepted Relay requests. This is separate from group access. Existing installations remain mention-based until configured.
+The `conversation` command enables semantic activation for selected authorized groups and their current member sets. Obtain the members' consent to send bounded group dialogue to Cloudflare Workers AI and to include recent group dialogue as context in accepted Relay requests. This is separate from group access. Existing approved groups retain their settings; new groups use explicit activation until configured. Inform members of the seven-day local dialogue retention before using natural conversation.
 
 Create a dedicated Cloudflare API token scoped to the intended account and Workers AI inference permission. Keep the token private. Set the credentials in the service environment:
 
@@ -101,7 +101,11 @@ Select the group numbers, enter the assistant's visible chat name (for example `
 
 Start the Bridge from the same environment. For the supplied systemd unit, place the two credential assignments in a private, mode-0600 `~/.config/nuwa-agent-relay-bridge/decision.env` file, reload the unit and start the service. For a custom service data directory, set its EnvironmentFile accordingly. Use a locally trusted editor; never put the token in Git, terminal history or logs.
 
-The model receives only recent text with conversation-local speaker labels (not native ID fields or attachment links). Unrelated dialogue is held in memory for up to ten minutes and twenty turns per group, with a 500-character bound per turn; accepted semantic requests persist their dialogue snapshot as part of the normal delivery record. Explicit native mentions, @All, assistant quotes, private chats and two-member chats bypass inference. When the assistant has spoken within the last four turns or its configured name appears in a short text message, Clef-flash may classify the message. A probability of at least 0.8 activates the assistant. Explicit mentions of other members and replies addressed elsewhere do not use semantic activation. Ambiguous messages remain local. On model failure or missing credentials, explicit activation continues; failures enter a 30-second inference cooldown.
+The model receives bounded text, observation timestamps and conversation-local speaker labels. Native ID fields and attachment links stay local. In approved groups, the Bridge stores up to 30 turns from the last seven days in its private SQLite database, with a 500-character bound per turn and at most 64 group windows. Restart preserves the window for the same approved audience and assistant generation. Expired window entries are removed during operation and at startup; observed membership changes, revoked consent and assistant switching remove affected dialogue. Keep database backups protected and apply the same retention policy to them. Accepted semantic requests persist their dialogue snapshot as part of normal delivery history, independently of the rolling window.
+
+Explicit native mentions, @All, assistant quotes, private chats and two-member chats bypass inference. When the assistant has spoken anywhere in the retained window or its configured name appears in a short text message, Clef-flash may classify the message. It receives timestamps and intervening conversation, so it can assess a natural reply hours or days later. A probability of at least 0.8 activates the assistant. Explicit mentions of other members and replies addressed elsewhere do not use semantic activation. Ambiguous messages remain local. On model failure or missing credentials, explicit activation continues; failures enter a 30-second inference cooldown.
+
+The window begins with events the running Bridge observes. After an upgrade from the memory-only version, send an explicit mention and receive a reply to establish dialogue in the persistent window.
 
 Restart after completing configuration.
 
@@ -159,6 +163,7 @@ Send a permitted request and observe an actual reply in the original LINE conver
 | --- | --- |
 | `/native/message/received` | Bridge accepted a native event for processing. |
 | `/group/roster/verified` | Native group ID and actual membership were verified. |
+| `/group/conversation/skipped` | A semantic candidate was skipped; the reason identifies approval, addressing, model availability, message size or missing assistant context. |
 | `/group/conversation/decided` | Model decision with probability and inference elapsed milliseconds; no dialogue text. |
 | `/group/conversation/failed`, `/group/conversation/disabled` | Explicit activation remains available; inspect credentials or model availability. |
 | `/relay/message/submitted` | Relay accepted the message and returned Message and Thread IDs. |
