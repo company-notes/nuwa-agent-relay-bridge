@@ -11,6 +11,8 @@ import { ConversationAddress } from '../src/ConversationAddress.js';
 import { AccessMode, AccessPolicy, type AccessSettings } from '../src/AccessPolicy.js';
 import type { BridgeBinding, MessagingBackend, NativeMessage, RelayClient, RelayMessage, RelaySubmission } from '../src/Contracts.js';
 import { DeliveryStore } from '../src/DeliveryStore.js';
+import { GroupActivationPolicy, type ConversationSettings } from '../src/GroupActivationPolicy.js';
+import type { ConversationDecision, DecisionInput } from '../src/ConversationDecision.js';
 
 class ControlledRelay implements RelayClient
 {
@@ -115,7 +117,9 @@ class Scenario
   bridge: Bridge;
 
   constructor(settings: AccessSettings = { mode: AccessMode.Allowlist, allowed_user_ids: ['employee'] },
-    private readonly groupSettings: GroupSettings = GroupPolicy.disabled)
+    private readonly groupSettings: GroupSettings = GroupPolicy.disabled,
+    private readonly conversationSettings?: ConversationSettings, private readonly decision?: ConversationDecision,
+    private readonly clock?: () => number)
   {
     this.settings = settings;
     this.store = this.open();
@@ -130,7 +134,8 @@ class Scenario
   private createBridge(): Bridge
   {
     return new Bridge(this.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
-      new GroupPolicy(this.groupSettings, this.messaging, Scenario.binding.accountID));
+      new GroupPolicy(this.groupSettings, this.messaging, Scenario.binding.accountID),
+      new GroupActivationPolicy(this.conversationSettings, this.decision, this.clock));
   }
 
   restart(): void
@@ -179,11 +184,11 @@ class Scenario
     });
   }
 
-  answer(threadId: string, id = 'relay-answer', senderSessionID = 'assistant-session'): void
+  answer(threadId: string, id = 'relay-answer', senderSessionID = 'assistant-session', body = 'Report ready'): void
   {
     this.relay.messages.unshift({
       id, threadId, kind: 'reply', senderSessionID, recipientSessionID: 'bridge-session',
-      body: 'Report ready', artifactLinks: [],
+      body, artifactLinks: [],
     });
   }
 
@@ -713,4 +718,142 @@ test('uncertain native delivery prevents switching to a different assistant', as
 
   assert.equal(s.relay.submissions[1]!.thread, s.relay.submissions[0]!.thread);
   assert.equal(s.store.unresolved, 1);
+});
+
+class ControlledDecision implements ConversationDecision
+{
+  readonly inputs: DecisionInput[] = [];
+  probability = 0.95;
+  fail = false;
+
+  async probabilityOfAddress(input: DecisionInput): Promise<number>
+  {
+    this.inputs.push(input);
+
+    if (this.fail)
+    {
+      throw new Error('Controlled model failure');
+    }
+
+    return this.probability;
+  }
+}
+
+class NaturalConversationScenario extends Scenario
+{
+  static readonly members = ['company-line', 'employee', 'coworker'];
+  readonly model: ControlledDecision;
+
+  constructor(model = new ControlledDecision(), clock?: () => number)
+  {
+    super(undefined, { mode: GroupMode.Open, approved_groups: [] }, {
+      assistant_name: '小媧', approved_groups: [{ id: 'company', member_ids: NaturalConversationScenario.members }],
+    }, model, clock);
+    this.model = model;
+    this.messaging.groups.set('company', [...NaturalConversationScenario.members]);
+    this.messaging.groups.set('project', [...NaturalConversationScenario.members]);
+  }
+
+  async introduce(): Promise<string>
+  {
+    await this.groupRequest('intro', 'company', 'employee', '@小媧 介紹自己', true);
+    await this.bridge.cycle();
+
+    const thread = this.relay.submissions[0]!.thread;
+    this.answer(thread, 'intro-answer', 'assistant-session', '大家好，我是小媧，負責公司聯絡。');
+    await this.bridge.cycle();
+    return thread;
+  }
+}
+
+test('a natural greeting follows the assistant introduction in the original group and Relay Thread', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+
+  const thread = await s.introduce();
+  assert.equal(s.model.inputs.length, 0);
+
+  await s.groupRequest('greeting', 'company', 'coworker', '妳好啊，改天一起吃飯');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 1);
+  assert.equal(s.model.inputs[0]!.history.at(-1)?.text, '大家好，我是小媧，負責公司聯絡。');
+  assert.equal(s.relay.submissions.length, 2);
+  assert.equal(s.relay.submissions[1]!.thread, thread);
+  assert.match(s.relay.submissions[1]!.body, /妳好啊，改天一起吃飯/);
+  assert.match(s.relay.submissions[1]!.body, /大家好，我是小媧/);
+
+  s.answer(thread, 'greeting-answer');
+  await s.bridge.cycle();
+  assert.equal(s.messaging.deliveries.length, 2);
+  assert.equal(s.messaging.deliveries[1]!.conversation, 'group:company');
+});
+
+test('ordinary chatter, low-confidence decisions, duplicate messages and other groups do not activate the assistant', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+  await s.introduce();
+
+  s.model.probability = 0.3;
+  await s.groupRequest('lunch', 'company', 'coworker', 'Bear，你今天午餐吃什麼？');
+  await s.groupRequest('lunch', 'company', 'coworker', 'Bear，你今天午餐吃什麼？');
+  await s.groupRequest('other', 'project', 'employee', '小媧，妳好');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 1);
+  assert.equal(s.relay.submissions.length, 1);
+
+  s.model.probability = 0.95;
+  await s.groupRequest('direct-name', 'company', 'employee', '小媧，幫我查訂單');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 2);
+  assert.equal(s.model.inputs[1]!.history.filter(turn => turn.text.includes('午餐')).length, 1);
+});
+
+test('an expired or changed audience loses natural conversation context and requires renewed approval', async t =>
+{
+  let now = 1000;
+  const s = new NaturalConversationScenario(undefined, () => now);
+  t.after(() => s.close());
+  await s.introduce();
+
+  now += 600_001;
+  await s.groupRequest('expired', 'company', 'employee', '妳好啊，改天一起吃飯');
+  assert.equal(s.model.inputs.length, 0);
+
+  await s.groupRequest('call', 'company', 'employee', '@小媧 你好', true);
+  await s.bridge.cycle();
+  s.answer(s.relay.submissions[0]!.thread, 'new-intro', 'assistant-session', '我是小媧');
+  await s.bridge.cycle();
+
+  s.messaging.groups.set('company', [...NaturalConversationScenario.members, 'new-member']);
+  await s.groupRequest('new-roster', 'company', 'employee', '小媧，妳好');
+  await s.bridge.cycle();
+  assert.equal(s.model.inputs.length, 0);
+
+  s.messaging.groups.set('company', [...NaturalConversationScenario.members]);
+  await s.groupRequest('returned', 'company', 'employee', '妳好啊');
+  await s.bridge.cycle();
+  assert.equal(s.model.inputs.length, 0);
+});
+
+test('a model outage keeps native mentions and private chats working without forwarding uncertain chatter', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+  await s.introduce();
+
+  s.model.fail = true;
+  await s.groupRequest('failure', 'company', 'coworker', '妳好啊');
+  await s.groupRequest('explicit', 'company', 'employee', '@All 報告', true);
+  await s.request('private', 'Private question');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 1);
+  assert.equal(s.relay.submissions.length, 3);
+  assert.match(s.relay.submissions[1]!.body, /@All 報告/);
+  assert.equal(s.relay.submissions[2]!.body, 'Private question');
 });

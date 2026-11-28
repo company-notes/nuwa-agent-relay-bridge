@@ -6,6 +6,7 @@ import { ConversationRouter } from './ConversationRouter.js';
 import { ConversationAddress } from './ConversationAddress.js';
 import { GroupPolicy } from './GroupPolicy.js';
 import { Logger } from './Logger.js';
+import { GroupActivationPolicy } from './GroupActivationPolicy.js';
 
 export class Bridge
 {
@@ -20,6 +21,7 @@ export class Bridge
     private readonly backend: MessagingBackend,
     private readonly policy: AccessPolicy,
     private readonly groupPolicy = new GroupPolicy(GroupPolicy.disabled, backend, binding.accountID),
+    private readonly activation = new GroupActivationPolicy(),
   )
   {
     this.router = new ConversationRouter(store);
@@ -70,7 +72,7 @@ export class Bridge
         return false;
       }
 
-      if (!addressed && audience.memberCount !== 2)
+      if (!await this.activation.activate(groupID, audience, message, addressed))
       {
         this.store.ignore(message);
         return false;
@@ -192,6 +194,11 @@ export class Bridge
     }
 
     this.store.recordDelivery(message, conversationID, nativeID);
+
+    if (groupID !== undefined && audience)
+    {
+      this.activation.recordReply(groupID, audience, message.body, nativeID);
+    }
     this.logger.info('/native/message/delivered', {
       native_message_id: nativeID, relay_message_id: message.id, relay_thread_id: message.threadId,
     });
