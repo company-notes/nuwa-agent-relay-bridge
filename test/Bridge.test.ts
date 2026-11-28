@@ -495,3 +495,37 @@ test('a changed group audience starts a separate conversation and cannot receive
   assert.equal(s.messaging.deliveries.length, 1);
   assert.equal(s.messaging.deliveries[0]!.conversation, 'group:company');
 });
+
+test('an authorized two-member group chats normally and a larger group only forwards addressed messages', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  s.groupRequest('first', 'company', 'employee', 'Hello');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 1);
+  const firstThread = s.relay.submissions[0]!.thread;
+  s.answer(firstThread);
+  await s.bridge.cycle();
+
+  s.groupRequest('follow-up', 'company', 'employee', 'What about tomorrow?');
+  await s.bridge.cycle();
+  assert.equal(s.relay.submissions[1]!.thread, firstThread);
+
+  s.messaging.groups.set('company', ['company-line', 'employee', 'coworker']);
+  s.groupRequest('chatter', 'company', 'employee', 'Lunch?');
+  s.groupRequest('addressed', 'company', 'coworker', '@All report', true);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 3);
+  assert.notEqual(s.relay.submissions[2]!.thread, firstThread);
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  s.groupRequest('small-again', 'company', 'employee', 'Continue');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 4);
+  assert.notEqual(s.relay.submissions[3]!.thread, s.relay.submissions[2]!.thread);
+});
