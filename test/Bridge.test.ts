@@ -1087,3 +1087,30 @@ test('expired group dialogue is removed on startup even without new incoming mes
   assert.equal(s.model.inputs.length, 0);
   assert.equal(s.relay.submissions.length, 1);
 });
+
+test('a company group continues natural conversation and delayed replies after members leave and join', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+
+  const thread = await s.introduce();
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  assert.equal(await s.groupRequest('after-leave', 'company', 'employee', '尾牙想吃什麼？'), true);
+  await s.bridge.cycle();
+
+  s.messaging.groups.set('company', ['company-line', 'employee', 'new-member']);
+  s.restart();
+  s.answer(thread, 'delayed-answer', 'assistant-session', '可以一起吃火鍋。');
+  await s.bridge.cycle();
+
+  assert.equal(await s.groupRequest('after-join', 'company', 'new-member', '那要去哪裡吃呢？'), true);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 3);
+  assert.ok(s.relay.submissions.every(item => item.thread === thread));
+  assert.equal(s.messaging.deliveries.length, 2);
+  assert.equal(s.model.inputs.length, 1);
+  assert.match(JSON.stringify(s.model.inputs[0]!.history), /尾牙想吃什麼/);
+  assert.match(JSON.stringify(s.model.inputs[0]!.history), /一起吃火鍋/);
+});
