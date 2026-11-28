@@ -14,7 +14,7 @@ export enum DeliveryState
   Ignored = 5,
 }
 
-export type InboundRecord = NativeMessage & { submissionID: string; groupAddressed: boolean };
+export type InboundRecord = NativeMessage & { submissionID: string; receivedAudience?: string };
 export type ConversationRoute = { conversationID: string; threadID: string; replyMessageID: string | null };
 
 export interface SubmissionPlan
@@ -61,8 +61,8 @@ export class DeliveryStore
       CREATE TABLE IF NOT EXISTS inbound_artifacts (
         message_id TEXT PRIMARY KEY, links TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS group_activation (
-        message_id TEXT PRIMARY KEY, addressed INTEGER NOT NULL
+      CREATE TABLE IF NOT EXISTS inbound_group_audiences (
+        message_id TEXT PRIMARY KEY, audience TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS submission_plans (
         message_id TEXT PRIMARY KEY, plan TEXT NOT NULL
@@ -105,7 +105,12 @@ export class DeliveryStore
     }
   }
 
-  accept(message: NativeMessage, groupAddressed?: boolean): boolean
+  accept(message: NativeMessage, receivedAudience?: string): boolean
+  {
+    return this.recordInbound(message, DeliveryState.Pending, receivedAudience);
+  }
+
+  private recordInbound(message: NativeMessage, state: DeliveryState, receivedAudience?: string): boolean
   {
     let accepted = false;
 
@@ -116,13 +121,13 @@ export class DeliveryStore
         (message_id, conversation_id, sender_id, body, reply_to_id, submission_id, state)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(message.messageID, message.conversationID, message.senderID, message.body,
-        message.replyToID ?? null, randomUUID(), DeliveryState.Pending);
+        message.replyToID ?? null, randomUUID(), state);
       accepted = Number(result.changes) === 1;
 
-      if (accepted && groupAddressed !== undefined)
+      if (accepted && receivedAudience !== undefined)
       {
-        this.database.prepare('INSERT INTO group_activation VALUES (?, ?)')
-          .run(message.messageID, groupAddressed ? 1 : 0);
+        this.database.prepare('INSERT INTO inbound_group_audiences VALUES (?, ?)')
+          .run(message.messageID, receivedAudience);
       }
 
       if (accepted && message.artifactLinks?.length)
@@ -140,14 +145,14 @@ export class DeliveryStore
     return this.database.prepare(`
       SELECT i.message_id AS messageID, i.conversation_id AS conversationID, i.sender_id AS senderID,
              i.body, i.reply_to_id AS replyToID, i.submission_id AS submissionID, a.links,
-             COALESCE(g.addressed, 1) AS groupAddressed
+             g.audience AS receivedAudience
       FROM inbound i LEFT JOIN inbound_artifacts a ON a.message_id = i.message_id
-      LEFT JOIN group_activation g ON g.message_id = i.message_id
+      LEFT JOIN inbound_group_audiences g ON g.message_id = i.message_id
       WHERE i.state = ? ORDER BY i.rowid
     `).all(DeliveryState.Pending).map(row => ({
       messageID: String(row.messageID), conversationID: String(row.conversationID),
       senderID: String(row.senderID), body: String(row.body), submissionID: String(row.submissionID),
-      groupAddressed: Number(row.groupAddressed) === 1,
+      ...(row.receivedAudience === null ? {} : { receivedAudience: String(row.receivedAudience) }),
       artifactLinks: row.links === null ? [] : JSON.parse(String(row.links)) as string[],
       ...(row.replyToID === null ? {} : { replyToID: String(row.replyToID) }),
     }));
@@ -190,14 +195,19 @@ export class DeliveryStore
       .run(DeliveryState.Blocked, messageID);
   }
 
-  ignore(messageID: string): void
+  ignore(message: NativeMessage): void
   {
-    this.transaction(() =>
-    {
-      this.database.prepare("UPDATE inbound SET state = ?, body = '', reply_to_id = NULL WHERE message_id = ?")
-        .run(DeliveryState.Ignored, messageID);
-      this.database.prepare('DELETE FROM inbound_artifacts WHERE message_id = ?').run(messageID);
-    });
+    this.recordDiscarded(message, DeliveryState.Ignored);
+  }
+
+  reject(message: NativeMessage): void
+  {
+    this.recordDiscarded(message, DeliveryState.Blocked);
+  }
+
+  private recordDiscarded(message: NativeMessage, state: DeliveryState): void
+  {
+    this.recordInbound({ ...message, body: '', replyToID: undefined, artifactLinks: [] }, state);
   }
 
   recordSubmission(message: InboundRecord, result: RelaySubmission, audience?: string): void

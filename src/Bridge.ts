@@ -25,7 +25,7 @@ export class Bridge
     this.router = new ConversationRouter(store);
   }
 
-  receive(message: NativeMessage): boolean
+  async receive(message: NativeMessage): Promise<boolean>
   {
     if (!message.senderID || message.senderID === this.binding.accountID)
     {
@@ -33,7 +33,7 @@ export class Bridge
     }
 
     const groupID = ConversationAddress.groupID(message.conversationID);
-    let groupAddressed: boolean | undefined;
+    let receivedAudience: string | undefined;
 
     if (groupID !== undefined)
     {
@@ -45,17 +45,34 @@ export class Bridge
       const quote = message.replyToID ? this.store.findQuote(message.replyToID, message.conversationID) : undefined;
       const quotesAssistant = Boolean(quote?.replyMessageID);
 
-      groupAddressed = Boolean(message.mentionsAccount || quotesAssistant);
+      const addressed = Boolean(message.mentionsAccount || quotesAssistant);
 
       if (message.replyToID && !quote)
       {
-        if (!groupAddressed)
+        if (!addressed)
         {
           return false;
         }
 
         message = { ...message, replyToID: undefined };
       }
+
+      const audience = await this.groupPolicy.audience(groupID, message.senderID);
+
+      if (!audience)
+      {
+        this.store.reject(message);
+        this.logger.info('/native/message/blocked', { native_message_id: message.messageID });
+        return false;
+      }
+
+      if (!addressed && audience.memberCount !== 2)
+      {
+        this.store.ignore(message);
+        return false;
+      }
+
+      receivedAudience = audience.fingerprint;
     }
     else if (message.senderID !== message.conversationID || !this.policy.accepts(message.senderID))
     {
@@ -67,7 +84,7 @@ export class Bridge
       throw new BridgeError('Invalid native text message.');
     }
 
-    if (this.store.accept(message, groupAddressed))
+    if (this.store.accept(message, receivedAudience))
     {
       this.logger.info('/native/message/received', { native_message_id: message.messageID });
     }
@@ -90,9 +107,12 @@ export class Bridge
         continue;
       }
 
-      if (audience && audience.memberCount !== 2 && !message.groupAddressed)
+      if (message.receivedAudience !== undefined && message.receivedAudience !== audience?.fingerprint)
       {
-        this.store.ignore(message.messageID);
+        this.store.block(message.messageID);
+        this.logger.info('/native/message/blocked', {
+          native_message_id: message.messageID, reason: 'audience_changed_before_submission',
+        });
         continue;
       }
 

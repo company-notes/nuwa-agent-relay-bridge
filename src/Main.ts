@@ -232,7 +232,7 @@ class Application
 
       try
       {
-        line.listen(message => { bridge.receive(message); }, error =>
+        line.listen(async message => { await bridge.receive(message); }, error =>
         {
           Application.logger.failure('native_receive_failed', error);
           stop();
@@ -260,6 +260,7 @@ class Application
         process.removeListener('SIGINT', stop);
         process.removeListener('SIGTERM', stop);
         stop();
+        await line.drain();
         store.close();
       }
     }

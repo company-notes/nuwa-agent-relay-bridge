@@ -16,6 +16,7 @@ export class LineBackend implements MessagingBackend
   private static readonly tokenKey = 'nuwa_bridge_auth_token';
   private static readonly logger = new Logger('line');
   private readonly controller = new AbortController();
+  private pendingReceive = Promise.resolve();
 
   private readonly contacts: LineContactDirectory;
   private readonly groups: LineGroupDirectory;
@@ -114,7 +115,7 @@ export class LineBackend implements MessagingBackend
     return this.groups.members(groupID);
   }
 
-  listen(receive: (message: NativeMessage) => void, onError: (error: unknown) => void): void
+  listen(receive: (message: NativeMessage) => Promise<void>, onError: (error: unknown) => void): void
   {
     this.client.on('message', message =>
     {
@@ -124,7 +125,13 @@ export class LineBackend implements MessagingBackend
 
         if (native)
         {
-          receive(native);
+          this.pendingReceive = this.pendingReceive.then(async () =>
+          {
+            if (!this.controller.signal.aborted)
+            {
+              await receive(native);
+            }
+          }).catch(onError);
         }
       }
       catch (error)
@@ -133,6 +140,11 @@ export class LineBackend implements MessagingBackend
       }
     });
     this.client.listen({ talk: true, square: false, signal: this.controller.signal });
+  }
+
+  async drain(): Promise<void>
+  {
+    await this.pendingReceive;
   }
 
   async send(conversationID: string, body: string): Promise<string>
