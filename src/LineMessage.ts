@@ -39,7 +39,7 @@ export class LineMessage
       const mentions = message.getMentions();
       return {
         mentionsAccount: mentions.some(mention => mention.all === true || mention.mid === accountID),
-        mentionsOther: mentions.some(mention => typeof mention.mid === 'string' && mention.mid !== accountID),
+        mentionsOther: mentions.some(mention => mention.all === false && typeof mention.mid === 'string' && mention.mid !== accountID),
       };
     }
     catch
