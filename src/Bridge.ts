@@ -21,7 +21,7 @@ export class Bridge
     private readonly backend: MessagingBackend,
     private readonly policy: AccessPolicy,
     private readonly groupPolicy = new GroupPolicy(GroupPolicy.disabled, backend, binding.accountID),
-    private readonly activation = new GroupActivationPolicy(),
+    private readonly activation = new GroupActivationPolicy(store.conversationHistory, groupPolicy.settings),
   )
   {
     this.router = new ConversationRouter(store);
@@ -229,7 +229,7 @@ export class Bridge
 
     if (groupID !== undefined && audience)
     {
-      this.activation.recordReply(groupID, audience, message.body);
+      this.activation.recordReply(groupID, audience, message.body, nativeID);
     }
 
     this.logger.info('/native/message/delivered', {

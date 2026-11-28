@@ -1,7 +1,8 @@
 import type { NativeMessage } from './Contracts.js';
 import type { ConversationDecision } from './ConversationDecision.js';
 import { ConversationWindow } from './ConversationWindow.js';
-import { GroupMode, GroupPolicy, type GroupApproval, type GroupAudience } from './GroupPolicy.js';
+import { ConversationHistory } from './ConversationHistory.js';
+import { GroupMode, GroupPolicy, type GroupApproval, type GroupAudience, type GroupSettings } from './GroupPolicy.js';
 import { BridgeError } from './BridgeError.js';
 import { Logger } from './Logger.js';
 
@@ -20,24 +21,42 @@ export class GroupActivationPolicy
 {
   static readonly threshold = 0.8;
   private static readonly cooldown = 30_000;
-  private static readonly maxGroups = 64;
-  private readonly approvals = new Map<string, string>();
-  private readonly windows = new Map<string, ConversationWindow>();
+  private readonly approvals: ReadonlyMap<string, string>;
   private readonly logger = new Logger('group-activation');
   private retryAt = 0;
 
-  constructor(private readonly settings?: ConversationSettings, private readonly decision?: ConversationDecision,
+  constructor(private readonly history: ConversationHistory, groupSettings: GroupSettings,
+    private readonly settings?: ConversationSettings, private readonly decision?: ConversationDecision,
     private readonly clock: () => number = Date.now)
   {
-    if (settings)
-    {
-      GroupActivationPolicy.validate(settings);
+    this.approvals = GroupActivationPolicy.approvedAudiences(settings, groupSettings);
+    this.history.reconcile(this.approvals);
+    this.prune();
+  }
 
-      for (const group of settings.approved_groups)
+  static approvedAudiences(settings: ConversationSettings | undefined, groupSettings: GroupSettings): ReadonlyMap<string, string>
+  {
+    const approvals = new Map<string, string>();
+
+    if (!settings || groupSettings.mode === GroupMode.Disabled)
+    {
+      return approvals;
+    }
+
+    GroupActivationPolicy.validate(settings);
+    const allowed = new Map(groupSettings.approved_groups.map(group => [group.id, GroupPolicy.fingerprint(group.member_ids)]));
+
+    for (const group of settings.approved_groups)
+    {
+      const audience = GroupPolicy.fingerprint(group.member_ids);
+
+      if (groupSettings.mode === GroupMode.Open || allowed.get(group.id) === audience)
       {
-        this.approvals.set(group.id, GroupPolicy.fingerprint(group.member_ids));
+        approvals.set(group.id, audience);
       }
     }
+
+    return approvals;
   }
 
   static validate(settings: ConversationSettings): void
@@ -53,15 +72,7 @@ export class GroupActivationPolicy
 
   prune(): void
   {
-    const now = this.clock();
-
-    for (const [id, window] of this.windows)
-    {
-      if (!window.prune(now))
-      {
-        this.windows.delete(id);
-      }
-    }
+    this.history.prune(this.clock());
   }
 
   authorizesContext(groupID: string, audience?: GroupAudience): boolean
@@ -71,63 +82,52 @@ export class GroupActivationPolicy
 
   observeAudience(groupID: string, audience?: GroupAudience): void
   {
-    const window = this.windows.get(groupID);
-
-    if (window && (window.audience !== audience?.fingerprint || !this.authorizesContext(groupID, audience)))
-    {
-      this.windows.delete(groupID);
-    }
-  }
-
-  private window(groupID: string, audience: GroupAudience): ConversationWindow | undefined
-  {
-    this.observeAudience(groupID, audience);
-    this.prune();
-
-    if (!this.settings || !this.decision || !this.authorizesContext(groupID, audience))
-    {
-      return undefined;
-    }
-
-    const window = this.windows.get(groupID) ?? new ConversationWindow(audience.fingerprint);
-    this.windows.delete(groupID);
-    this.windows.set(groupID, window);
-
-    if (this.windows.size > GroupActivationPolicy.maxGroups)
-    {
-      this.windows.delete(this.windows.keys().next().value!);
-    }
-
-    return window;
+    this.history.observeAudience(groupID, this.authorizesContext(groupID, audience) ? audience!.fingerprint : undefined);
   }
 
   async activate(groupID: string, audience: GroupAudience, message: NativeMessage, addressed: boolean): Promise<Activation | undefined>
   {
-    const window = this.window(groupID, audience);
-    const name = this.settings?.assistant_name;
+    this.observeAudience(groupID, audience);
     const direct = addressed || audience.memberCount === 2;
 
-    if (!window || !this.decision || !name)
+    if (!this.authorizesContext(groupID, audience))
     {
-      return direct ? {} : undefined;
+      return direct ? {} : this.skip(message, 'not_approved');
     }
 
-    const candidate = window.hasRecentAssistant || message.body.toLowerCase().includes(name.toLowerCase());
-    const eligible = !direct && !message.mentionsOther && !message.replyToID && candidate &&
-      message.body.length <= ConversationWindow.maxText && this.clock() >= this.retryAt;
-    const input = eligible ? window.snapshot(name, message.senderID, message.body) : undefined;
+    const name = this.settings!.assistant_name;
+    const now = this.clock();
+    this.history.prune(now);
+    const window = this.history.window(groupID, audience.fingerprint, message.messageID);
 
-    window.append(message.body, this.clock(), message.senderID);
+    this.history.append(groupID, audience.fingerprint, message.messageID, message.body, now, message.senderID);
 
     if (direct)
     {
       return {};
     }
 
-    if (!input)
+    if (message.mentionsOther || message.replyToID)
     {
-      return undefined;
+      return this.skip(message, 'addressed_elsewhere');
     }
+
+    if (!this.decision || now < this.retryAt)
+    {
+      return this.skip(message, 'decision_unavailable');
+    }
+
+    if (message.body.length > ConversationWindow.maxText)
+    {
+      return this.skip(message, 'message_too_long');
+    }
+
+    if (!window.hasAssistant && !message.body.toLowerCase().includes(name.toLowerCase()))
+    {
+      return this.skip(message, 'no_assistant_context');
+    }
+
+    const input = window.snapshot(name, message.senderID, message.body, now);
 
     const start = this.clock();
 
@@ -162,8 +162,21 @@ export class GroupActivationPolicy
     }
   }
 
-  recordReply(groupID: string, audience: GroupAudience, body: string): void
+  private skip(message: NativeMessage, reason: string): undefined
   {
-    this.window(groupID, audience)?.append(body, this.clock());
+    this.logger.info('/group/conversation/skipped', { native_message_id: message.messageID, reason });
+    return undefined;
+  }
+
+  recordReply(groupID: string, audience: GroupAudience, body: string, nativeID: string): void
+  {
+    this.observeAudience(groupID, audience);
+
+    if (this.authorizesContext(groupID, audience))
+    {
+      const now = this.clock();
+      this.history.prune(now);
+      this.history.append(groupID, audience.fingerprint, nativeID, body, now);
+    }
   }
 }

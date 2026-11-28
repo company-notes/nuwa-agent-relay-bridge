@@ -135,7 +135,7 @@ class Scenario
   {
     return new Bridge(this.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
       new GroupPolicy(this.groupSettings, this.messaging, Scenario.binding.accountID),
-      new GroupActivationPolicy(this.conversationSettings, this.decision, this.clock));
+      new GroupActivationPolicy(this.store.conversationHistory, this.groupSettings, this.conversationSettings, this.decision, this.clock));
   }
 
   revokeConversationApproval(): void
@@ -987,6 +987,7 @@ test('an employee continues the assistant conversation hours later and again the
 
   assert.equal(s.model.inputs.length, 1);
   assert.match(s.model.inputs[0]!.history.at(-1)!.text, /大家好/);
+  assert.equal(s.model.inputs[0]!.latest.time - s.model.inputs[0]!.history.at(-1)!.time, 3 * 60 * 60 * 1000);
   assert.equal(s.relay.submissions[1]!.thread, thread);
 
   s.answer(thread, 'dinner-answer', 'assistant-session', '謝謝邀請，大家可以一起討論。');

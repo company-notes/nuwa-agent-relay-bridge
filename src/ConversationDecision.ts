@@ -2,6 +2,7 @@ export interface ConversationTurn
 {
   speaker: string;
   text: string;
+  time: number;
 }
 
 export interface DecisionInput
