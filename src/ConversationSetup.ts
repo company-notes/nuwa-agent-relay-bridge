@@ -12,7 +12,7 @@ export class ConversationSetup
   async select(previous?: ConversationSettings): Promise<ConversationSettings | undefined>
   {
     console.log('Natural group conversation sends bounded recent text to Cloudflare Workers AI for addressee classification.');
-    console.log('Selected groups must consent to cloud processing, contextual forwarding and local retention of up to 30 recent turns for seven days.');
+    console.log('Enabled groups use cloud processing, contextual forwarding and local retention of up to 30 recent turns for seven days. Inform group members of this behavior.');
 
     const groups = await this.groups();
     groups.forEach((group, index) => console.log(`${index + 1}. ${group.name} (${group.memberIDs.length} members)`));
@@ -26,16 +26,14 @@ export class ConversationSetup
 
     const name = (await this.input.question('Assistant chat name [' + (previous?.assistant_name ?? '小媧') + ']: ')).trim()
       || previous?.assistant_name || '小媧';
-    const settings = { assistant_name: name, approved_groups: selected.map(group => ({
-      id: group.id, member_ids: group.memberIDs,
-    })) };
+    const settings = { assistant_name: name, approved_groups: selected.map(group => ({ id: group.id })) };
     GroupActivationPolicy.validate(settings);
 
-    const confirmation = (await this.input.question('Confirm member consent for cloud processing and contextual forwarding (type yes): ')).trim();
+    const confirmation = (await this.input.question('Enable natural conversation for the selected groups (type yes): ')).trim();
 
     if (confirmation !== 'yes')
     {
-      throw new BridgeError('Natural group conversation approval was not confirmed.');
+      throw new BridgeError('Natural group conversation setup was not confirmed.');
     }
 
     return settings;

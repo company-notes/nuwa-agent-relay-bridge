@@ -2,7 +2,7 @@ import type { NativeMessage } from './Contracts.js';
 import type { ConversationDecision } from './ConversationDecision.js';
 import { ConversationWindow } from './ConversationWindow.js';
 import { ConversationHistory } from './ConversationHistory.js';
-import { GroupMode, GroupPolicy, type GroupApproval, type GroupAudience, type GroupSettings } from './GroupPolicy.js';
+import { GroupMode, GroupPolicy, type GroupApproval, type GroupMembership, type GroupSettings } from './GroupPolicy.js';
 import { BridgeError } from './BridgeError.js';
 import { Logger } from './Logger.js';
 
@@ -21,7 +21,7 @@ export class GroupActivationPolicy
 {
   static readonly threshold = 0.8;
   private static readonly cooldown = 30_000;
-  private readonly approvals: ReadonlyMap<string, string>;
+  private readonly enabled: ReadonlySet<string>;
   private readonly logger = new Logger('group-activation');
   private retryAt = 0;
 
@@ -29,34 +29,23 @@ export class GroupActivationPolicy
     private readonly settings?: ConversationSettings, private readonly decision?: ConversationDecision,
     private readonly clock: () => number = Date.now)
   {
-    this.approvals = GroupActivationPolicy.approvedAudiences(settings, groupSettings);
-    this.history.reconcile(this.approvals);
+    this.enabled = GroupActivationPolicy.enabledGroups(settings, groupSettings);
+    this.history.reconcile(this.enabled);
     this.prune();
   }
 
-  static approvedAudiences(settings: ConversationSettings | undefined, groupSettings: GroupSettings): ReadonlyMap<string, string>
+  static enabledGroups(settings: ConversationSettings | undefined, groupSettings: GroupSettings): ReadonlySet<string>
   {
-    const approvals = new Map<string, string>();
-
     if (!settings || groupSettings.mode === GroupMode.Disabled)
     {
-      return approvals;
+      return new Set();
     }
 
     GroupActivationPolicy.validate(settings);
-    const allowed = new Map(groupSettings.approved_groups.map(group => [group.id, GroupPolicy.fingerprint(group.member_ids)]));
+    const allowed = new Set(groupSettings.approved_groups.map(group => group.id));
 
-    for (const group of settings.approved_groups)
-    {
-      const audience = GroupPolicy.fingerprint(group.member_ids);
-
-      if (groupSettings.mode === GroupMode.Open || allowed.get(group.id) === audience)
-      {
-        approvals.set(group.id, audience);
-      }
-    }
-
-    return approvals;
+    return new Set(settings.approved_groups.filter(group => groupSettings.mode === GroupMode.Open || allowed.has(group.id))
+      .map(group => group.id));
   }
 
   static validate(settings: ConversationSettings): void
@@ -75,34 +64,27 @@ export class GroupActivationPolicy
     this.history.prune(this.clock());
   }
 
-  authorizesContext(groupID: string, audience?: GroupAudience): boolean
+  authorizesContext(groupID: string): boolean
   {
-    return audience !== undefined && this.approvals.get(groupID) === audience.fingerprint;
+    return this.enabled.has(groupID);
   }
 
-  observeAudience(groupID: string, audience?: GroupAudience): void
+  async activate(groupID: string, membership: GroupMembership, message: NativeMessage, addressed: boolean): Promise<Activation | undefined>
   {
-    this.history.observeAudience(groupID, this.authorizesContext(groupID, audience) ? audience?.fingerprint : undefined);
-  }
+    const direct = addressed || membership.memberCount === 2;
 
-  async activate(groupID: string, audience: GroupAudience, message: NativeMessage, addressed: boolean): Promise<Activation | undefined>
-  {
-    this.observeAudience(groupID, audience);
-
-    const direct = addressed || audience.memberCount === 2;
-
-    if (!this.authorizesContext(groupID, audience))
+    if (!this.authorizesContext(groupID))
     {
-      return direct ? {} : this.skip(message, 'not_approved');
+      return direct ? {} : this.skip(message, 'not_enabled');
     }
 
     const name = this.settings!.assistant_name;
     const now = this.clock();
     this.history.prune(now);
 
-    const window = direct ? undefined : this.history.window(groupID, audience.fingerprint, message.messageID);
+    const window = direct ? undefined : this.history.window(groupID, message.messageID);
 
-    this.history.append(groupID, audience.fingerprint, message.messageID, message.body, now, message.senderID);
+    this.history.append(groupID, message.messageID, message.body, now, message.senderID);
 
     if (!window)
     {
@@ -169,15 +151,13 @@ export class GroupActivationPolicy
     return undefined;
   }
 
-  recordReply(groupID: string, audience: GroupAudience, body: string, nativeID: string): void
+  recordReply(groupID: string, body: string, nativeID: string): void
   {
-    this.observeAudience(groupID, audience);
-
-    if (this.authorizesContext(groupID, audience))
+    if (this.authorizesContext(groupID))
     {
       const now = this.clock();
       this.history.prune(now);
-      this.history.append(groupID, audience.fingerprint, nativeID, body, now);
+      this.history.append(groupID, nativeID, body, now);
     }
   }
 }

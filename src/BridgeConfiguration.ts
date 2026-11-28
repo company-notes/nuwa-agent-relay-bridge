@@ -52,6 +52,14 @@ export class BridgeConfiguration
       GroupActivationPolicy.validate(config.conversation);
     }
 
+    // Normalize deployed roster-based selections to stable group identities.
+    config.groups = { ...config.groups!, approved_groups: config.groups!.approved_groups.map(group => ({ id: group.id })) };
+
+    if (config.conversation)
+    {
+      config.conversation = { ...config.conversation, approved_groups: config.conversation.approved_groups.map(group => ({ id: group.id })) };
+    }
+
     return config;
   }
 
