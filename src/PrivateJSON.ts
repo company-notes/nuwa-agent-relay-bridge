@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export class PrivateJSON
@@ -23,8 +23,29 @@ export class PrivateJSON
 
     try
     {
-      writeFileSync(temporary, JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
+      const fd = openSync(temporary, 'wx', 0o600);
+
+      try
+      {
+        writeFileSync(fd, JSON.stringify(value, null, 2));
+        fsyncSync(fd);
+      }
+      finally
+      {
+        closeSync(fd);
+      }
+
       renameSync(temporary, this.path);
+      const directory = openSync(dirname(this.path), 'r');
+
+      try
+      {
+        fsyncSync(directory);
+      }
+      finally
+      {
+        closeSync(directory);
+      }
     }
     finally
     {

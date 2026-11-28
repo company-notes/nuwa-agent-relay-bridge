@@ -124,20 +124,28 @@ export class Bridge
 
   private async deliver(message: RelayMessage): Promise<void>
   {
-    if (message.kind !== 'reply' ||
-        message.recipientSessionID !== this.binding.sessionID ||
-        message.senderSessionID !== this.binding.recipientSessionID)
+    if (message.kind !== 'reply' || message.recipientSessionID !== this.binding.sessionID)
     {
       return;
     }
 
-    const conversationID = this.store.findThread(message.threadId);
+    const route = this.store.threadRoute(message.threadId);
 
-    if (!conversationID || this.store.hasOutbound(message.id))
+    if (!route || route.recipientSessionID !== message.senderSessionID || this.store.hasOutbound(message.id))
     {
       return;
     }
 
+    if (!route.active || route.recipientSessionID !== this.binding.recipientSessionID)
+    {
+      this.store.blockOutbound(message);
+      this.logger.info('/native/reply/blocked', {
+        relay_message_id: message.id, relay_thread_id: message.threadId, reason: 'former_assistant',
+      });
+      return;
+    }
+
+    const conversationID = route.conversationID;
     const groupID = ConversationAddress.groupID(conversationID);
     const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID);
     const permitted = groupID === undefined

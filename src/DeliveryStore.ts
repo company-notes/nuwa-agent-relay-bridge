@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 import type { BridgeBinding, NativeMessage, RelayMessage, RelaySubmission } from './Contracts.js';
+import { AssistantBinding } from './AssistantBinding.js';
 
 export enum DeliveryState
 {
@@ -28,12 +29,14 @@ export interface SubmissionPlan
 export class DeliveryStore
 {
   private readonly database: DatabaseSync;
+  private readonly assistant: AssistantBinding;
 
   constructor(path: string, binding: BridgeBinding)
   {
     this.database = new DatabaseSync(path);
     this.database.exec(`
       PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = FULL;
       PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS bridge_binding (
         id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL
@@ -71,7 +74,8 @@ export class DeliveryStore
 
     try
     {
-      this.bindIdentity(binding);
+      this.assistant = new AssistantBinding(this.database, binding);
+      this.transaction(() => this.assistant.initialize(this.pendingCount, this.unresolved));
     }
     catch (error)
     {
@@ -80,41 +84,9 @@ export class DeliveryStore
     }
   }
 
-  prepareAssistantSwitch(_next: BridgeBinding): void
+  prepareAssistantSwitch(next: BridgeBinding): void
   {
-    throw new BridgeError('Assistant switching is not implemented.');
-  }
-
-  private bindIdentity(binding: BridgeBinding): void
-  {
-    const identity = [binding.sessionID, binding.accountID, binding.recipientSessionID, binding.recipientAddress];
-    const value = JSON.stringify(identity);
-
-    this.transaction(() =>
-    {
-      this.database.prepare('INSERT OR IGNORE INTO bridge_binding VALUES (1, ?)').run(value);
-      const row = this.database.prepare('SELECT value FROM bridge_binding WHERE id = 1').get();
-
-      if (row?.value === value)
-      {
-        return;
-      }
-
-      const previous = JSON.parse(String(row?.value)) as unknown;
-
-      if (!Array.isArray(previous) || previous.length !== 5 ||
-          JSON.stringify([previous[0], previous[1], previous[3], previous[4]]) !== value)
-      {
-        throw new BridgeError('Stored bridge identity differs from configuration.');
-      }
-
-      if (this.pendingCount)
-      {
-        throw new BridgeError('Complete pending submissions with the previous pilot before upgrading.');
-      }
-
-      this.database.prepare('UPDATE bridge_binding SET value = ? WHERE id = 1').run(value);
-    });
+    this.transaction(() => this.assistant.prepare(next, this.pendingCount, this.unresolved));
   }
 
   private transaction(action: () => void): void
@@ -186,8 +158,9 @@ export class DeliveryStore
     return this.database.prepare(`
       SELECT l.conversation_id AS conversationID, l.thread_id AS threadID, NULL AS replyMessageID
       FROM inbound i JOIN native_links l ON l.native_id = i.message_id
-      WHERE i.conversation_id = ? AND i.state = ? ORDER BY i.rowid DESC LIMIT 1
-    `).get(conversationID, DeliveryState.Complete) as ConversationRoute | undefined;
+      JOIN thread_assistants a ON a.thread_id = l.thread_id
+      WHERE i.conversation_id = ? AND i.state = ? AND a.generation = ? ORDER BY i.rowid DESC LIMIT 1
+    `).get(conversationID, DeliveryState.Complete, this.assistant.generation) as ConversationRoute | undefined;
   }
 
   submissionPlan(messageID: string): SubmissionPlan | undefined
@@ -205,9 +178,10 @@ export class DeliveryStore
   findQuote(messageID: string, conversationID: string): ConversationRoute | undefined
   {
     return this.database.prepare(`
-      SELECT conversation_id AS conversationID, thread_id AS threadID, reply_message_id AS replyMessageID
-      FROM native_links WHERE native_id = ? AND conversation_id = ?
-    `).get(messageID, conversationID) as ConversationRoute | undefined;
+      SELECT l.conversation_id AS conversationID, l.thread_id AS threadID, l.reply_message_id AS replyMessageID
+      FROM native_links l JOIN thread_assistants a ON a.thread_id = l.thread_id
+      WHERE l.native_id = ? AND l.conversation_id = ? AND a.generation = ?
+    `).get(messageID, conversationID, this.assistant.generation) as ConversationRoute | undefined;
   }
 
   block(messageID: string): void
@@ -232,6 +206,7 @@ export class DeliveryStore
     {
       this.database.prepare('INSERT OR IGNORE INTO thread_routes VALUES (?, ?)')
         .run(result.threadId, message.conversationID);
+      this.assistant.recordThread(result.threadId);
 
       const route = this.findThread(result.threadId);
 
@@ -260,9 +235,20 @@ export class DeliveryStore
 
   findThread(threadID: string): string | undefined
   {
-    const row = this.database.prepare('SELECT conversation_id FROM thread_routes WHERE thread_id = ?').get(threadID);
+    const route = this.threadRoute(threadID);
+    return route?.active ? route.conversationID : undefined;
+  }
 
-    return typeof row?.conversation_id === 'string' ? row.conversation_id : undefined;
+  threadRoute(threadID: string): { conversationID: string; recipientSessionID: string; active: boolean } | undefined
+  {
+    const row = this.database.prepare(`
+      SELECT r.conversation_id AS conversationID, a.recipient_session_id AS recipientSessionID,
+             a.generation = ? AS active
+      FROM thread_routes r JOIN thread_assistants a ON a.thread_id = r.thread_id WHERE r.thread_id = ?
+    `).get(this.assistant.generation, threadID);
+
+    return row ? { conversationID: String(row.conversationID), recipientSessionID: String(row.recipientSessionID),
+      active: Number(row.active) === 1 } : undefined;
   }
 
   threadAudience(threadID: string): string | undefined
