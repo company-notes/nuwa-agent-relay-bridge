@@ -924,6 +924,7 @@ test('a lost Relay response preserves the accepted dialogue snapshot without rep
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   const thread = await s.introduce();
 
   await s.groupRequest('natural-retry', 'company', 'coworker', '改天一起吃飯');
@@ -993,10 +994,12 @@ test('an employee continues the assistant conversation hours later and again the
   let now = Date.parse('2026-11-28T01:00:00Z');
   const s = new NaturalConversationScenario(undefined, () => now);
   t.after(() => s.close());
+
   const thread = await s.introduce();
 
   now += 3 * 60 * 60 * 1000;
   s.restart();
+
   await s.groupRequest('dinner', 'company', 'employee', '妳尾牙想不想吃飯, 要吃什麼');
   await s.bridge.cycle();
 
@@ -1010,6 +1013,7 @@ test('an employee continues the assistant conversation hours later and again the
 
   now += 24 * 60 * 60 * 1000;
   s.restart();
+
   await s.groupRequest('next-day', 'company', 'employee', '那我們吃火鍋好嗎？');
   await s.bridge.cycle();
 
@@ -1022,6 +1026,7 @@ test('intervening human conversation is available for addressee decisions withou
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   const thread = await s.introduce();
 
   s.model.probability = 0.1;
@@ -1045,6 +1050,7 @@ test('the former assistant dialogue cannot return after switching away and back'
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   await s.introduce();
 
   s.switchAssistant('ava-session', 'example/ava/main');
@@ -1065,6 +1071,7 @@ test('expired group dialogue is removed on startup even without new incoming mes
   let now = Date.parse('2026-11-28T01:00:00Z');
   const s = new NaturalConversationScenario(undefined, () => now);
   t.after(() => s.close());
+
   await s.introduce();
 
   assert.equal(s.dialogueCount(), 2);
@@ -1073,6 +1080,7 @@ test('expired group dialogue is removed on startup even without new incoming mes
   s.restart();
 
   assert.equal(s.dialogueCount(), 0);
+
   await s.groupRequest('after-expiry', 'company', 'employee', '妳好啊');
   await s.bridge.cycle();
 

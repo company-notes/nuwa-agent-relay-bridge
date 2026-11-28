@@ -82,6 +82,7 @@ export class DeliveryStore
     {
       this.assistant = new AssistantBinding(this.database, binding);
       this.transaction(() => this.assistant.initialize(this.pendingCount, this.unresolved));
+
       this.conversationHistory = new ConversationHistory(this.database, this.assistant.generation);
     }
     catch (error)

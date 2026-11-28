@@ -88,6 +88,7 @@ export class GroupActivationPolicy
   async activate(groupID: string, audience: GroupAudience, message: NativeMessage, addressed: boolean): Promise<Activation | undefined>
   {
     this.observeAudience(groupID, audience);
+
     const direct = addressed || audience.memberCount === 2;
 
     if (!this.authorizesContext(groupID, audience))
@@ -98,6 +99,7 @@ export class GroupActivationPolicy
     const name = this.settings!.assistant_name;
     const now = this.clock();
     this.history.prune(now);
+
     const window = direct ? undefined : this.history.window(groupID, audience.fingerprint, message.messageID);
 
     this.history.append(groupID, audience.fingerprint, message.messageID, message.body, now, message.senderID);
@@ -128,7 +130,6 @@ export class GroupActivationPolicy
     }
 
     const input = window.snapshot(name, message.senderID, message.body, now);
-
     const start = this.clock();
 
     try

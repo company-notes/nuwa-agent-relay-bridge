@@ -253,6 +253,7 @@ class Application
       }
 
       await update(config, line, input);
+
       const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), this.config.binding(config));
 
       try
@@ -266,6 +267,7 @@ class Application
       {
         store.close();
       }
+
       this.printStart();
     }
     finally
