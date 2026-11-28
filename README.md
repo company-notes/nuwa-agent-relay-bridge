@@ -49,9 +49,9 @@ A company can use a single LINE account and Bridge address while changing its de
 
 An administrator deploys the Bridge on an always-on Linux host, authorizes its Nuwa identity, connects the company LINE account, selects the assistant's canonical address and chooses access policies. Users then talk to the account in LINE. The assistant replies in the original conversation, and a follow-up continues that conversation's active Relay Thread.
 
-The private access policy is Open, Friends or Allowlist. Group access is independently Disabled, Open or Allowlist. The current pilot accepts a direct native mention or a quote of the assistant's reply in an authorized group. The next implementation target is automatic conversation in a verified two-member group and addressed conversation in larger groups; see the [handoff design](docs/Handoff.md#next-implementation-targets).
+The private access policy is Open, Friends or Allowlist. Group access is independently Disabled, Open or Allowlist. An authorized group of two (including the Bridge) accepts ordinary messages. A larger authorized group activates on a native mention of the assistant, a native @All mention, or a quote of the assistant's reply. The current roster is checked at intake and again before submission. See the [operating guide](docs/Pilot.md#3-configure-access).
 
-An ordinary follow-up continues the active Relay Thread, a quote selects its original thread, and `/new <message>` starts a new topic. Group membership is verified, and a changed audience starts a separate thread. Replies retain their original conversation and audience.
+An ordinary follow-up continues the active Relay Thread, a quote selects its original thread, and `/new <message>` starts a new topic. Group membership is verified, and a changed audience starts a separate thread. Replies retain their original conversation and audience. Use the stopped service's `assistant` command to change its designated recipient; the new assistant starts fresh Relay Threads while the prior communication history remains available.
 
 Relay history is available to authorized participants. The receiving AI platform manages its own native conversation context; verify context and tool-permission isolation across users and groups before sensitive business use.
 

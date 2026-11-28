@@ -4,7 +4,7 @@
 
 A company exposes one messaging account, such as 小媧｜女媧資訊 in LINE, through which people can ask its AI team questions and assign work. The Bridge delivers those requests to a designated AI assistant and returns its answers to the originating chat. The assistant can collaborate with other AI coworkers through Nuwa.
 
-Start with the [README](../README.md) for the product, component definitions and overall architecture. This guide explains the standard technical design and the next implementation targets. The [operating guide](Pilot.md) covers released behavior; [TESTING.md](../TESTING.md) defines acceptance.
+Start with the [README](../README.md) for the product, component definitions and overall architecture. This guide explains the standard technical design and operating contracts. The [operating guide](Pilot.md) covers operator commands; [TESTING.md](../TESTING.md) defines acceptance.
 
 ## 2. Architecture and ownership
 
@@ -91,15 +91,13 @@ A native submission acknowledgment is evidence of submission, and a real LINE co
 
 Backend modules own protocol-specific behavior and produce normalized events; the Bridge core owns the common lifecycle. Keep platform-specific operations behind the backend and Relay interfaces.
 
-## 7. Next implementation targets
-
-These are design requirements for the next version, not commands or behaviors available in the current release.
+## 7. Assistant selection and group activation
 
 ### Change the designated assistant
 
-Provide an `assistant` command that displays the current canonical address, resolves the new assistant in the same organization, verifies its receiving identity and saves the change with the service stopped. For example, `nuwainfo/line/main` can change its destination from `nuwainfo/chief/main` to `nuwainfo/ava/main`.
+The `assistant` command displays the current canonical address, resolves the new assistant in the same organization, and saves the confirmed change with the service stopped. Verify the selected assistant's receiving route through a real round trip. For example, `nuwainfo/line/main` can change its destination from `nuwainfo/chief/main` to `nuwainfo/ava/main`.
 
-Preserve OAuth, the LINE account, private/group policies, historical routes and delivery evidence. Start a fresh active Relay Thread for each native conversation when its designated assistant changes. Scope active threads, quotes and reply authorization to the appropriate assistant. Define and test the old assistant's pending and delayed deliveries before migration; the standard cutover should reconcile pending submissions and retain their original recipient. A quoted historical conversation must never silently route a new request to the former assistant. Configuration and SQLite binding changes must be crash-recoverable. The present database binds the designated recipient along with the Bridge identity, so an authorized migration is required.
+The cutover preserves OAuth, the LINE account, private/group policies, historical routes and delivery evidence. Complete pending submissions and reconcile uncertain native deliveries before confirming. Each cutover advances a persisted assistant generation (the routing epoch); new conversations start fresh Relay Threads, including when returning to an earlier assistant. Historical quotes cannot select an earlier generation. Delayed replies from earlier generations remain recorded in Relay and are blocked from LINE delivery after cutover. A durable SQLite switch intent, atomic configuration rename and startup reconciliation preserve consistency across interruption.
 
 ### Group activation by audience size
 
@@ -109,13 +107,13 @@ Use deterministic native membership rather than model-based relevance classifica
 | --- | --- |
 | Authorized private chat | Ordinary incoming messages. |
 | Authorized group of two, including the Bridge | Ordinary incoming messages from the other member. |
-| Authorized group of three or more | Native mention of the assistant or quote of its previous reply. |
+| Authorized group of three or more | Native mention of the assistant, native @All, or quote of its previous reply. |
 
-A current membership change updates the activation rule and starts a separate Relay Thread; Allowlist membership changes require fresh approval. Self-generated messages and a standalone @Everyone do not activate the assistant. Check the same audience used for authorization and activation before submission. Preserve group and private separation.
+A verified membership change updates the activation rule and starts a separate Relay Thread when the active thread's audience differs; Allowlist membership changes require fresh approval. Self-generated messages remain local. Native @All addresses every member including the assistant. Verify the audience at intake and again before submission; discard unaddressed larger-group chatter without keeping its body. A changed audience before submission blocks the request. Preserve group and private separation.
 
 ### Operational and context acceptance
 
-Validate real two-member and larger groups, a change of designated assistant, interleaved private and group chats, and group member changes. Verify the receiving AI's context with distinct harmless markers in separate conversations. Plan systemd (the Linux service manager) integration for automatic startup and restart, and durable Inbox event replay for longer offline intervals. Feature availability is established through tests and released artifacts.
+Validate real two-member and larger groups, a change of designated assistant, interleaved private and group chats, and group member changes. Verify the receiving AI's context with distinct harmless markers in separate conversations. A user-level systemd (Linux service manager) unit is provided in the [operating guide](Pilot.md#6-run-as-a-background-service); its behavior on the target host requires acceptance. Durable Inbox event replay for longer offline intervals remains a separate implementation target.
 
 ## 8. Engineering workflow and entry points
 

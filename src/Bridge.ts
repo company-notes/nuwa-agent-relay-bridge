@@ -32,6 +32,11 @@ export class Bridge
       return false;
     }
 
+    if (!message.messageID || !message.body.trim() || message.body.length > 100_000)
+    {
+      throw new BridgeError('Invalid native text message.');
+    }
+
     const groupID = ConversationAddress.groupID(message.conversationID);
     let receivedAudience: string | undefined;
 
@@ -77,11 +82,6 @@ export class Bridge
     else if (message.senderID !== message.conversationID || !this.policy.accepts(message.senderID))
     {
       return false;
-    }
-
-    if (!message.messageID || !message.body.trim() || message.body.length > 100_000)
-    {
-      throw new BridgeError('Invalid native text message.');
     }
 
     if (this.store.accept(message, receivedAudience))

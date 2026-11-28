@@ -119,19 +119,18 @@ export class LineBackend implements MessagingBackend
   {
     this.client.on('message', message =>
     {
+      if (this.controller.signal.aborted)
+      {
+        return;
+      }
+
       try
       {
         const native = LineMessage.normalize(message, this.accountID);
 
         if (native)
         {
-          this.pendingReceive = this.pendingReceive.then(async () =>
-          {
-            if (!this.controller.signal.aborted)
-            {
-              await receive(native);
-            }
-          }).catch(onError);
+          this.pendingReceive = this.pendingReceive.then(() => receive(native)).catch(onError);
         }
       }
       catch (error)

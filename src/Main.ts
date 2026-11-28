@@ -226,6 +226,7 @@ class Application
         new GroupPolicy(config.groups ?? GroupPolicy.disabled, line, binding.accountID));
 
       let stopped = false;
+      let receiveFailure: unknown;
       const stop = () => { stopped = true; line.stop(); };
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);
@@ -234,6 +235,7 @@ class Application
       {
         line.listen(async message => { await bridge.receive(message); }, error =>
         {
+          receiveFailure = error;
           Application.logger.failure('native_receive_failed', error);
           stop();
         });
@@ -262,6 +264,11 @@ class Application
         stop();
         await line.drain();
         store.close();
+      }
+
+      if (receiveFailure !== undefined)
+      {
+        throw receiveFailure;
       }
     }
     finally

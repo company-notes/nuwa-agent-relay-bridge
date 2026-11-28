@@ -18,18 +18,17 @@ Use real SQLite databases in temporary directories for automated tests. Controll
 | Inbox window | A saturated 100-message window without a known checkpoint requires reconciliation. |
 | Contact policy | Friends and Allowlist govern inbound requests and delayed replies; configuration and authorization persist across upgrades. |
 | Content | Text and valid public sticker artifact links reach Relay; private media type notices are accurate. |
-| Group access and activation | Disabled is the default; an approved member can mention the assistant, receive an original-group reply and quote it after restart. Ambient chatter, @Everyone and invalid quotes stay local. |
+| Group access and activation | Disabled is the default; an approved member can mention the assistant, receive an original-group reply and quote it after restart. Two-member groups accept ordinary messages; larger groups forward native mentions, @All and valid assistant quotes. Ambient chatter and invalid quotes stay local. |
 | Group identity and audience | Validate the joined-group directory, matching group ID, actual member map and account/sender membership even with a conflicting chat-type label. Pending invitations and former membership confer no access. A changed audience starts a new thread; older delayed replies stay protected. |
 | Process locking | A real child process holds the OS lock; a competing process is rejected. After forced termination a new process acquires the existing lock file. |
 
-## Next implementation targets
+## Assistant cutover and group activation
 
-Add scenario tests for the design in [Handoff.md](docs/Handoff.md#next-implementation-targets):
+- Switch the designated assistant while preserving account identity, policies and historical evidence. New conversations route to the new assistant. Pending submissions, historical quotes, delayed replies and interrupted configuration migrations obey the cutover contract. Switching back creates another generation.
+- Authorize automatic conversation in a verified two-member group; require a direct mention, native @All or assistant quote in larger groups. Verify the audience at intake and submission; test member changes, reapproval, self messages, duplicate ambient events and @All.
+## Additional live acceptance
 
-- Switch the designated assistant while preserving account identity, policies and historical evidence. New conversations route to the new assistant. Pending submissions, historical quotes, delayed replies and interrupted configuration migrations obey the cutover contract.
-- Authorize automatic conversation only in a verified two-member group; require a direct mention or assistant quote in larger groups. Verify the audience at submission and test member changes, reapproval, self messages and @Everyone.
-- Demonstrate native AI context and business-tool permission isolation with separate harmless markers across simultaneous chats.
-- Verify durable receive recovery and automatic process lifecycle when implemented.
+Demonstrate native AI context and business-tool permission isolation with separate harmless markers across simultaneous chats. Verify the systemd unit's startup and restart on the target host. Durable receive replay requires its own implementation and acceptance.
 
 ## Engineering verification
 

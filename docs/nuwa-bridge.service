@@ -1,0 +1,15 @@
+[Unit]
+Description=Nuwa Agent Relay Bridge
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nuwa-bridge start
+WorkingDirectory=%h
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=90s
+UMask=0077
+
+[Install]
+WantedBy=default.target

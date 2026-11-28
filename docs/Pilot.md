@@ -81,7 +81,7 @@ Join the company account to the desired LINE group using LINE. Run:
 
 Choose Disabled, Open (all joined groups, with confirmation) or Allowlist (selected groups and approved current membership). The default is Disabled. Group access is independent of the private policy. Allowlist membership changes require approval through the same command. The Bridge verifies current membership before submitting a group request or delivering a reply.
 
-In the current release, a genuine native @Mention or quote of the assistant's own previous reply triggers a group message. Ordinary group chatter and @Everyone stay local. This applies to two-member groups as well. The next version's intended automatic two-member activation is described in the [handoff](Handoff.md#group-activation-by-audience-size).
+A verified group of two, including the Bridge, accepts ordinary incoming messages. In larger groups, a genuine native @Mention, @All or quote of the assistant's previous reply activates the assistant; unrelated chatter remains local. The Bridge verifies the audience at intake and before submission. See the [handoff](Handoff.md#group-activation-by-audience-size).
 
 Restart after completing configuration.
 
@@ -108,11 +108,32 @@ Stop the service, inspect its status and reconcile unresolved work.
 
 Status reports the Bridge address, designated assistant, access modes and pending, blocked and uncertain delivery counts. Back up the private data directory while stopped and restrict access to the backup. Download the new matching executable to a temporary filename, verify its checksum, make it executable and replace the installed executable. Start it using the same data directory. This retains the account, OAuth, policies and delivery history.
 
-The existing release binds the designated assistant to its persisted database. The planned assistant-switch command is documented in the [handoff](Handoff.md#change-the-designated-assistant). Preserve the database and configuration until that migration is available.
+### Change the designated assistant
 
-## 6. Verify operation and diagnose failures
+Stop the service, complete pending submissions and reconcile uncertain native deliveries. Run:
 
-Send a permitted request and observe an actual reply in the original LINE conversation. Follow up and verify the same Relay Thread; use a second authorized chat and interleave replies. For a group, use a native mention, receive a reply, then quote the reply. Verify excluded chats and changed group audiences are protected. See [TESTING.md](../TESTING.md) for the complete acceptance scope.
+```sh
+./nuwa-bridge-linux-arm64.run assistant
+```
+
+Enter the new assistant's canonical address, such as `nuwainfo/ava/main`, and confirm with `yes`. The command resolves the address in the same organization, preserves the Bridge's OAuth and LINE identity, policies and history, and starts a new routing generation. Delayed replies and quotes from the former generation are withheld. Start the service and verify an ordinary private and group conversation with the new assistant.
+
+## 6. Run as a background service
+
+systemd is the Linux service manager. Install the supplied [user service unit](nuwa-bridge.service) as `~/.config/systemd/user/nuwa-bridge.service`. The unit expects a stable executable path at `~/.local/bin/nuwa-bridge`; point that path to the installed standalone executable (a symbolic link is sufficient).
+
+```sh
+mkdir -p ~/.local/bin ~/.config/systemd/user
+ln -s "$HOME/nuwa-bridge/nuwa-bridge-linux-arm64.run" ~/.local/bin/nuwa-bridge
+systemctl --user daemon-reload
+systemctl --user enable --now nuwa-bridge
+```
+
+Enable user lingering with `sudo loginctl enable-linger "$USER"` when the host should run the service before login. The unit restarts failed processes. Inspect operation with `systemctl --user status nuwa-bridge` and `journalctl --user -u nuwa-bridge -f`. Stop it with `systemctl --user stop nuwa-bridge` before configuration or upgrade, then start it again. Confirm automatic startup and restart on the actual host.
+
+## 7. Verify operation and diagnose failures
+
+Send a permitted request and observe an actual reply in the original LINE conversation. Follow up and verify the same Relay Thread; use a second authorized chat and interleave replies. For a two-member group, send an ordinary message. For a larger group, verify ambient chatter remains local, then use a native mention, @All and a quote of the reply. Verify excluded chats and changed group audiences are protected. See [TESTING.md](../TESTING.md) for the complete acceptance scope.
 
 | Log or evidence | Meaning |
 | --- | --- |
