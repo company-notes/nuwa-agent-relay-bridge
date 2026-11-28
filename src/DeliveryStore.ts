@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import type { BridgeBinding, NativeMessage, RelayMessage, RelaySubmission } from './Contracts.js';
 import { AssistantBinding } from './AssistantBinding.js';
+import { ConversationHistory } from './ConversationHistory.js';
 
 export enum DeliveryState
 {
@@ -30,6 +31,7 @@ export class DeliveryStore
 {
   private readonly database: DatabaseSync;
   private readonly assistant: AssistantBinding;
+  readonly conversationHistory: ConversationHistory;
 
   constructor(path: string, binding: BridgeBinding)
   {
@@ -38,6 +40,7 @@ export class DeliveryStore
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = FULL;
       PRAGMA busy_timeout = 5000;
+      PRAGMA secure_delete = ON;
       CREATE TABLE IF NOT EXISTS bridge_binding (
         id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL
       );
@@ -79,6 +82,8 @@ export class DeliveryStore
     {
       this.assistant = new AssistantBinding(this.database, binding);
       this.transaction(() => this.assistant.initialize(this.pendingCount, this.unresolved));
+
+      this.conversationHistory = new ConversationHistory(this.database, this.assistant.generation);
     }
     catch (error)
     {

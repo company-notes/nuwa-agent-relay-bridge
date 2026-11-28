@@ -21,6 +21,7 @@ import { ProcessLock } from './ProcessLock.js';
 import { RemoteRelayClient } from './RemoteRelayClient.js';
 import { GroupActivationPolicy } from './GroupActivationPolicy.js';
 import { ClefDecisionModel } from './ClefDecisionModel.js';
+import type { ConversationDecision } from './ConversationDecision.js';
 import { ConversationSetup } from './ConversationSetup.js';
 
 class Application
@@ -205,32 +206,37 @@ class Application
     });
   }
 
-  private activation(config: BridgeConfig): GroupActivationPolicy
+  private activation(config: BridgeConfig, store: DeliveryStore): GroupActivationPolicy
   {
     const settings = config.conversation;
+    const groups = config.groups ?? GroupPolicy.disabled;
+    const history = store.conversationHistory;
     const accountID = process.env.CLOUDFLARE_ACCOUNT_ID;
     const token = process.env.CLOUDFLARE_API_TOKEN;
 
     if (!settings?.approved_groups.length)
     {
-      return new GroupActivationPolicy();
+      return new GroupActivationPolicy(history, groups);
     }
 
     if (!accountID || !token)
     {
       Application.logger.info('/group/conversation/disabled', { reason: 'missing_workers_ai_credentials' });
-      return new GroupActivationPolicy(settings);
+      return new GroupActivationPolicy(history, groups, settings);
     }
+
+    let decision: ConversationDecision | undefined;
 
     try
     {
-      return new GroupActivationPolicy(settings, new ClefDecisionModel(accountID, token));
+      decision = new ClefDecisionModel(accountID, token);
     }
     catch (error)
     {
       Application.logger.failure('/group/conversation/disabled', error);
-      return new GroupActivationPolicy(settings);
     }
+
+    return new GroupActivationPolicy(history, groups, settings, decision);
   }
 
   private async configurePolicy(update: (config: BridgeConfig, line: LineBackend, input: Interface) => Promise<void>): Promise<void>
@@ -247,7 +253,21 @@ class Application
       }
 
       await update(config, line, input);
-      this.config.write(config);
+
+      const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), this.config.binding(config));
+
+      try
+      {
+        store.conversationHistory.reconcile(GroupActivationPolicy.approvedAudiences(config.conversation,
+          config.groups ?? GroupPolicy.disabled));
+        store.conversationHistory.prune(Date.now());
+        this.config.write(config);
+      }
+      finally
+      {
+        store.close();
+      }
+
       this.printStart();
     }
     finally
@@ -279,8 +299,8 @@ class Application
         throw new BridgeError('LINE account differs from its configured identity.');
       }
 
-      const activation = this.activation(config);
       const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), binding);
+      const activation = this.activation(config, store);
       const bridge = new Bridge(binding, store, this.relay, line, new AccessPolicy(config.access, line),
         new GroupPolicy(config.groups ?? GroupPolicy.disabled, line, binding.accountID), activation);
 

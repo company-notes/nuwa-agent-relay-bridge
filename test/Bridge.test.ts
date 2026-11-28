@@ -135,7 +135,7 @@ class Scenario
   {
     return new Bridge(this.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
       new GroupPolicy(this.groupSettings, this.messaging, Scenario.binding.accountID),
-      new GroupActivationPolicy(this.conversationSettings, this.decision, this.clock));
+      new GroupActivationPolicy(this.store.conversationHistory, this.groupSettings, this.conversationSettings, this.decision, this.clock));
   }
 
   revokeConversationApproval(): void
@@ -196,6 +196,20 @@ class Scenario
       id, threadId, kind: 'reply', senderSessionID, recipientSessionID: 'bridge-session',
       body, artifactLinks: [],
     });
+  }
+
+  dialogueCount(): number
+  {
+    const database = new DatabaseSync(join(this.dir, 'delivery.sqlite3'), { readOnly: true });
+
+    try
+    {
+      return Number(database.prepare('SELECT COUNT(*) AS total FROM group_dialogue').get()!.total);
+    }
+    finally
+    {
+      database.close();
+    }
   }
 
   close(): void
@@ -829,7 +843,7 @@ test('an expired or changed audience loses natural conversation context and requ
 
   await s.introduce();
 
-  now += 600_001;
+  now += 7 * 24 * 60 * 60 * 1000 + 1;
   await s.groupRequest('expired', 'company', 'employee', '妳好啊，改天一起吃飯');
   assert.equal(s.model.inputs.length, 0);
 
@@ -879,6 +893,7 @@ test('revoked natural-conversation approval blocks a persisted contextual reques
   assert.equal(s.store.pendingCount, 1);
 
   s.revokeConversationApproval();
+  assert.equal(s.dialogueCount(), 0);
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 1);
@@ -909,6 +924,7 @@ test('a lost Relay response preserves the accepted dialogue snapshot without rep
 {
   const s = new NaturalConversationScenario();
   t.after(() => s.close());
+
   const thread = await s.introduce();
 
   await s.groupRequest('natural-retry', 'company', 'coworker', '改天一起吃飯');
@@ -935,7 +951,7 @@ test('short-term dialogue is bounded, uses local speaker labels, and does not in
 
   s.model.probability = 0.1;
 
-  for (let i = 0; i < 22; i++)
+  for (let i = 0; i < 32; i++)
   {
     await s.groupRequest('ambient-' + i, 'company', 'coworker', '文字' + i + 'x'.repeat(700));
   }
@@ -944,7 +960,7 @@ test('short-term dialogue is bounded, uses local speaker labels, and does not in
   await s.groupRequest('named', 'company', 'employee', '小媧，幫我看一下');
   const input = s.model.inputs.at(-1)!;
 
-  assert.equal(input.history.length, 20);
+  assert.equal(input.history.length, 30);
   assert.ok(input.history.every(turn => turn.text.length <= 512));
   assert.ok(input.history.every(turn => !turn.speaker.includes('coworker')));
   assert.ok(!JSON.stringify(input).includes('OTHER GROUP PRIVATE MARKER'));
@@ -971,4 +987,103 @@ test('model cooldown suppresses repeated failures and resumes natural classifica
 
   assert.equal(s.model.inputs.length, 2);
   assert.equal(s.relay.submissions.length, 2);
+});
+
+test('an employee continues the assistant conversation hours later and again the next day after restart', async t =>
+{
+  let now = Date.parse('2026-11-28T01:00:00Z');
+  const s = new NaturalConversationScenario(undefined, () => now);
+  t.after(() => s.close());
+
+  const thread = await s.introduce();
+
+  now += 3 * 60 * 60 * 1000;
+  s.restart();
+
+  await s.groupRequest('dinner', 'company', 'employee', '妳尾牙想不想吃飯, 要吃什麼');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 1);
+  assert.match(s.model.inputs[0]!.history.at(-1)!.text, /大家好/);
+  assert.equal(s.model.inputs[0]!.latest.time - s.model.inputs[0]!.history.at(-1)!.time, 3 * 60 * 60 * 1000);
+  assert.equal(s.relay.submissions[1]!.thread, thread);
+
+  s.answer(thread, 'dinner-answer', 'assistant-session', '謝謝邀請，大家可以一起討論。');
+  await s.bridge.cycle();
+
+  now += 24 * 60 * 60 * 1000;
+  s.restart();
+
+  await s.groupRequest('next-day', 'company', 'employee', '那我們吃火鍋好嗎？');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 2);
+  assert.match(s.model.inputs[1]!.history.at(-1)!.text, /謝謝邀請/);
+  assert.equal(s.relay.submissions[2]!.thread, thread);
+});
+
+test('intervening human conversation is available for addressee decisions without a four-turn cutoff', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+
+  const thread = await s.introduce();
+
+  s.model.probability = 0.1;
+
+  for (let i = 0; i < 6; i++)
+  {
+    await s.groupRequest('chatter-' + i, 'company', 'coworker', '同事閒聊 ' + i);
+  }
+
+  s.model.probability = 0.95;
+  await s.groupRequest('continue-topic', 'company', 'employee', '妳尾牙想不想吃飯, 要吃什麼');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 7);
+  assert.ok(s.model.inputs.at(-1)!.history.some(turn => turn.text.includes('大家好')));
+  assert.equal(s.relay.submissions.length, 2);
+  assert.equal(s.relay.submissions[1]!.thread, thread);
+});
+
+test('the former assistant dialogue cannot return after switching away and back', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+
+  await s.introduce();
+
+  s.switchAssistant('ava-session', 'example/ava/main');
+  assert.equal(s.dialogueCount(), 0);
+  await s.groupRequest('after-switch', 'company', 'employee', '妳尾牙想吃什麼？');
+  await s.bridge.cycle();
+
+  s.switchAssistant('assistant-session', 'example/may/main');
+  await s.groupRequest('after-switch-back', 'company', 'employee', '妳好啊');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 0);
+  assert.equal(s.relay.submissions.length, 1);
+});
+
+test('expired group dialogue is removed on startup even without new incoming messages', async t =>
+{
+  let now = Date.parse('2026-11-28T01:00:00Z');
+  const s = new NaturalConversationScenario(undefined, () => now);
+  t.after(() => s.close());
+
+  await s.introduce();
+
+  assert.equal(s.dialogueCount(), 2);
+
+  now += 7 * 24 * 60 * 60 * 1000 + 1;
+  s.restart();
+
+  assert.equal(s.dialogueCount(), 0);
+
+  await s.groupRequest('after-expiry', 'company', 'employee', '妳好啊');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 0);
+  assert.equal(s.relay.submissions.length, 1);
 });

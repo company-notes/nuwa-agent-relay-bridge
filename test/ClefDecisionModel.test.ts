@@ -10,8 +10,8 @@ class DecisionService
   static readonly token = 'test-only-token';
   static readonly greeting: DecisionInput = {
     assistantName: '小媧',
-    history: [{ speaker: 'ASSISTANT (小媧)', text: '大家好，我是小媧。' }],
-    latest: { speaker: 'Human 1', text: '妳好啊，改天一起吃飯' },
+    history: [{ speaker: 'ASSISTANT (小媧)', text: '大家好，我是小媧。', time: Date.parse('2026-11-28T01:00:00Z') }],
+    latest: { speaker: 'Human 1', text: '妳好啊，改天一起吃飯', time: Date.parse('2026-11-28T04:00:00Z') },
   };
 
   readonly requests: { url: string; options: RequestInit }[] = [];
@@ -44,7 +44,7 @@ test('a natural greeting traverses the authenticated Workers AI decision contrac
   assert.equal(body.input.model, 'clef-flash');
   assert.equal(body.input.questions.addressed.type, 'noul');
 
-  assert.match(body.input.state, /LATEST MESSAGE: Human 1: "妳好啊，改天一起吃飯"/);
+  assert.match(body.input.state, /LATEST MESSAGE: \[2026-11-28T04:00:00.000Z\] Human 1: "妳好啊，改天一起吃飯"/);
   assert.ok(!JSON.stringify(body).includes(DecisionService.token));
 });
 
