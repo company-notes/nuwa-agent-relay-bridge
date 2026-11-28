@@ -17,31 +17,35 @@ export class LineMessage
 
     const senderID = message.from.id;
     const content = this.content(message);
-    const mentionsAccount = isGroup && this.mentionsAccount(message, accountID);
+    const mentions = isGroup ? this.mentions(message, accountID) : { mentionsAccount: false, mentionsOther: false };
 
     return {
       messageID: message.raw.id, senderID,
       conversationID: isGroup ? ConversationAddress.group(message.to.id) : senderID,
-      body: content.body, mentionsAccount,
+      body: content.body, ...mentions,
       artifactLinks: content.artifactLinks, replyToID: message.getReplyTarget()?.id,
     };
   }
 
-  private static mentionsAccount(message: TalkMessage, accountID: string): boolean
+  private static mentions(message: TalkMessage, accountID: string): { mentionsAccount: boolean; mentionsOther: boolean }
   {
     if (message.raw.contentType !== 'NONE')
     {
-      return false;
+      return { mentionsAccount: false, mentionsOther: false };
     }
 
     try
     {
-      return message.getMentions().some(mention => mention.all === true || mention.mid === accountID);
+      const mentions = message.getMentions();
+      return {
+        mentionsAccount: mentions.some(mention => mention.all === true || mention.mid === accountID),
+        mentionsOther: mentions.some(mention => typeof mention.mid === 'string' && mention.mid !== accountID),
+      };
     }
     catch
     {
-      // Malformed mention metadata cannot activate a group message.
-      return false;
+      // Malformed metadata cannot establish an explicit addressee.
+      return { mentionsAccount: false, mentionsOther: false };
     }
   }
 

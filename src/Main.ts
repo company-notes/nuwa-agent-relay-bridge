@@ -222,7 +222,15 @@ class Application
       return new GroupActivationPolicy(settings);
     }
 
-    return new GroupActivationPolicy(settings, new ClefDecisionModel(accountID, token));
+    try
+    {
+      return new GroupActivationPolicy(settings, new ClefDecisionModel(accountID, token));
+    }
+    catch (error)
+    {
+      Application.logger.failure('/group/conversation/disabled', error);
+      return new GroupActivationPolicy(settings);
+    }
   }
 
   private async configurePolicy(update: (config: BridgeConfig, line: LineBackend, input: Interface) => Promise<void>): Promise<void>

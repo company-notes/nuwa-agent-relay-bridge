@@ -64,11 +64,16 @@ export class GroupActivationPolicy
     }
   }
 
+  authorizesContext(groupID: string, audience?: GroupAudience): boolean
+  {
+    return audience !== undefined && this.approvals.get(groupID) === audience.fingerprint;
+  }
+
   observeAudience(groupID: string, audience?: GroupAudience): void
   {
     const window = this.windows.get(groupID);
 
-    if (window && (window.audience !== audience?.fingerprint || this.approvals.get(groupID) !== audience?.fingerprint))
+    if (window && (window.audience !== audience?.fingerprint || !this.authorizesContext(groupID, audience)))
     {
       this.windows.delete(groupID);
     }
@@ -79,7 +84,7 @@ export class GroupActivationPolicy
     this.observeAudience(groupID, audience);
     this.prune();
 
-    if (!this.settings || !this.decision || this.approvals.get(groupID) !== audience.fingerprint)
+    if (!this.settings || !this.decision || !this.authorizesContext(groupID, audience))
     {
       return undefined;
     }
@@ -99,16 +104,18 @@ export class GroupActivationPolicy
   async activate(groupID: string, audience: GroupAudience, message: NativeMessage, addressed: boolean): Promise<Activation | undefined>
   {
     const window = this.window(groupID, audience);
-    const name = this.settings?.assistant_name ?? '';
+    const name = this.settings?.assistant_name;
     const direct = addressed || audience.memberCount === 2;
 
-    if (!window || !this.decision)
+    if (!window || !this.decision || !name)
     {
       return direct ? {} : undefined;
     }
 
     const candidate = window.hasRecentAssistant || message.body.toLowerCase().includes(name.toLowerCase());
-    const input = window.snapshot(name, message.senderID, message.body);
+    const eligible = !direct && !message.mentionsOther && !message.replyToID && candidate &&
+      message.body.length <= ConversationWindow.maxText && this.clock() >= this.retryAt;
+    const input = eligible ? window.snapshot(name, message.senderID, message.body) : undefined;
     window.append(message.body, this.clock(), message.senderID);
 
     if (direct)
@@ -116,7 +123,7 @@ export class GroupActivationPolicy
       return {};
     }
 
-    if (!candidate || message.body.length > ConversationWindow.maxText || this.clock() < this.retryAt)
+    if (!input)
     {
       return undefined;
     }

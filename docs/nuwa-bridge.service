@@ -6,6 +6,7 @@ After=network-online.target
 Type=simple
 ExecStart=%h/.local/bin/nuwa-bridge start
 WorkingDirectory=%h
+EnvironmentFile=-%h/.config/nuwa-agent-relay-bridge/decision.env
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=90s

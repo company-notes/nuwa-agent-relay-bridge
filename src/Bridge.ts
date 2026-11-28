@@ -133,6 +133,16 @@ export class Bridge
         continue;
       }
 
+      if (message.context !== undefined &&
+          (groupID === undefined || !this.activation.authorizesContext(groupID, audience)))
+      {
+        this.store.block(message.messageID);
+        this.logger.info('/native/message/blocked', {
+          native_message_id: message.messageID, reason: 'conversation_approval_revoked',
+        });
+        continue;
+      }
+
       const plan = this.router.plan(message, audience?.fingerprint);
 
       if (!plan)

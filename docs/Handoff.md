@@ -86,6 +86,7 @@ A native submission acknowledgment is evidence of submission, and a real LINE co
 | Authorization and Relay transport | `OAuthCredentials.ts`, `RemoteRelayClient.ts`, `Contracts.ts` |
 | Messaging backend | `LineBackend.ts`, `LineStorage.ts`, `LineLoginPrompt.ts`, `LineMessage.ts` |
 | Access and native directories | `AccessPolicy.ts`, `AccessSetup.ts`, `LineContactDirectory.ts`, `GroupPolicy.ts`, `GroupSetup.ts`, `LineGroupDirectory.ts` |
+| Natural conversation | `ConversationWindow.ts`, `ConversationDecision.ts`, `ClefDecisionModel.ts`, `GroupActivationPolicy.ts`, `ConversationSetup.ts` |
 | Conversation and delivery | `Bridge.ts`, `ConversationAddress.ts`, `ConversationRouter.ts`, `DeliveryStore.ts` |
 | Packaging and verification | `scripts/`, `test/`, `.github/workflows/` |
 
@@ -101,15 +102,23 @@ The cutover preserves OAuth, the LINE account, private/group policies, historica
 
 ### Group activation by audience size
 
-Use deterministic native membership rather than model-based relevance classification:
+Use deterministic native membership and explicit addressing first; approved groups may opt into natural addressee classification:
 
 | Verified conversation | Activation |
 | --- | --- |
 | Authorized private chat | Ordinary incoming messages. |
 | Authorized group of two, including the Bridge | Ordinary incoming messages from the other member. |
-| Authorized group of three or more | Native mention of the assistant, native @All, or quote of its previous reply. |
+| Authorized group of three or more | Native mention of the assistant, native @All, quote of its previous reply, or an approved natural-conversation decision. |
 
-A verified membership change updates the activation rule and starts a separate Relay Thread when the active thread's audience differs; Allowlist membership changes require fresh approval. Self-generated messages remain local. Native @All addresses every member including the assistant. Verify the audience at intake and again before submission; discard unaddressed larger-group chatter without keeping its body. A changed audience before submission blocks the request. Preserve group and private separation.
+A verified membership change updates the activation rule and starts a separate Relay Thread when the active thread's audience differs; Allowlist membership changes require fresh approval. Self-generated messages remain local. Native @All addresses every member including the assistant. Verify the audience at intake and again before submission. Unaddressed larger-group chatter is excluded from Relay; the opt-in natural-conversation window temporarily retains recent text in memory. A changed audience before submission blocks the request. Preserve group and private separation.
+
+### Natural conversation
+
+GroupActivationPolicy owns deterministic activation, per-roster consent, eligibility, the decision threshold and cooldown. ConversationWindow owns bounded in-memory, group-isolated dialogue with conversation-local speaker labels. ClefDecisionModel implements the replaceable ConversationDecision interface and authenticates the Workers AI HTTP request. ConversationRouter attaches the accepted context as external dialogue data; DeliveryStore preserves the exact accepted snapshot and submission plan across retries. The designated assistant alone interprets the request and executes work.
+
+Natural activation requires matching approved membership, an eligible short message, the assistant's recent participation or visible name, and probability >= 0.8. Explicit native addressing bypasses inference, while an explicit mention of another member or quote directed elsewhere suppresses inference. A changed observed audience clears the window and disables inference for an unapproved roster. Restart clears ephemeral dialogue; an accepted request can resume only with its original audience and current contextual consent. No model call can override group access, recipient identity, thread routing or tool authorization. Accepted snapshots become part of Relay history and retain normal delivery-record semantics. The model has no business tools.
+
+The initial pilot uses Clef-flash with a 2.5-second HTTP timeout, 30-second failure cooldown, at most 64 active group windows, 20 turns and ten minutes of age. Only acknowledged native assistant replies enter the window. Text is bounded to 500 characters per turn plus a truncation marker; longer latest messages require explicit activation. The design favors avoiding unsolicited replies; model accuracy and latency depend on real dialogue and service availability. Use [operator configuration](Pilot.md#natural-group-conversation-optional) to enable it.
 
 ### Operational and context acceptance
 
