@@ -1,60 +1,147 @@
-# Linux pilot acceptance
+# LINE Bridge operating guide
 
-The pilot uses one company LINE account and one existing Nuwa-enabled AI assistant. People send ordinary private messages through LINE under an administrator-selected access policy. Run the pilot in an isolated organization with a restricted assistant whose tools, data and memory are safe for all permitted senders.
+The Bridge lets people talk to a company's designated AI assistant using an ordinary LINE account. Read the [README](../README.md) for the system and terminology. Use this guide to deploy and operate the released Linux pilot in a controlled environment. The [engineering handoff](Handoff.md) defines the design and future capabilities.
 
-## Installation
+## 1. Prepare the host and assistant
 
-Download the Linux executable matching the host architecture from [GitHub Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases). It includes the Node.js runtime, compiled application, and runtime dependencies. The target is a 64-bit Linux host with glibc 2.28 or later, Linux kernel 4.18 or later, and a standard POSIX shell, tar, gzip and util-linux flock. Use a directory with enough temporary disk space to unpack the runtime.
+Choose an always-on Linux x64 or ARM64 host, an authorized LINE account and an existing Nuwa-enabled AI assistant. Verify the assistant's canonical address and receiving route using the [official Nuwa Skill](https://mcp.agent-relay.company-notes.com/skills/nuwa-agent-relay/SKILL.md). The assistant's business tools and native context must be appropriate for all allowed LINE participants.
 
-Check the host with `uname -m`, `uname -r`, and `getconf GNU_LIBC_VERSION`. Select the asset based on the machine architecture:
+The bundled Node.js 24.11.0 runtime targets glibc 2.28+, Linux kernel 4.18+ and a POSIX shell, tar, gzip and util-linux `flock`. Check the host with:
 
-| Machine architecture | Release asset |
+```sh
+uname -m
+uname -r
+getconf GNU_LIBC_VERSION
+command -v flock
+```
+
+Select the standalone executable from [Releases](https://github.com/company-notes/nuwa-agent-relay-bridge/releases) and verify its checksum using the supplied SHA256SUMS.
+
+| Host | Asset |
 | --- | --- |
-| `x86_64` | `nuwa-bridge-linux-x64.run` |
-| `aarch64` | `nuwa-bridge-linux-arm64.run` |
+| x86_64 | nuwa-bridge-linux-x64.run |
+| aarch64 | nuwa-bridge-linux-arm64.run |
 
-The original Jetson Nano operating system based on JetPack 4 (Ubuntu 18.04, Linux 4.9) is outside the bundled [Node.js 24.11.0 supported platform baseline](https://github.com/nodejs/node/blob/v24.11.0/BUILDING.md#platform-list). Use a supported host operating system; architecture alone does not establish compatibility.
+The package includes Node.js and application dependencies. Keep adequate temporary disk space for extraction. Jetson Nano systems with Linux 4.9 are outside the bundled runtime's supported kernel baseline; use a supported host for production.
 
-For example, on ARM64:
+## 2. Set up the Bridge
+
+For an ARM64 host, run the following in the installation directory. Use the x64 asset on x64 hosts.
 
 ```sh
 chmod +x nuwa-bridge-linux-arm64.run
 ./nuwa-bridge-linux-arm64.run --version
 ./nuwa-bridge-linux-arm64.run setup
+```
+
+For a remote host, establish the OAuth loopback tunnel from the administrator's computer before opening the authorization URL:
+
+```sh
+ssh -N -L 43183:127.0.0.1:43183 user@vps
+```
+
+1. Open the authorization URL printed by the Bridge and complete Nuwa OAuth in the browser.
+2. Record the returned Bridge canonical address and enter the designated assistant's exact canonical address.
+3. Connect LINE by scanning the terminal QR code with the authorized account and completing its PIN prompt. Treat the QR and PIN as credentials.
+4. Select the private access policy: Open, Friends or Allowlist.
+
+The temporary OAuth callback listener closes after authorization. The LINE login uses its own connection. Keep the private data directory `~/.config/nuwa-agent-relay-bridge` protected; it contains OAuth, LINE login state, configuration and the SQLite delivery store. `NUWA_BRIDGE_HOME` selects a different directory.
+
+Start the service:
+
+```sh
 ./nuwa-bridge-linux-arm64.run start
 ```
 
-Run setup on the host where the service will run. For VPS setup, establish the port forward from your own computer before opening the authorization link:
+Run one instance per data directory. Ctrl+C or SIGTERM stops it. The operating system releases the process lock on exit or crash; retain the lock file.
+
+## 3. Configure access
+
+Stop the Bridge before changing access settings.
 
 ```sh
-ssh -L 43183:127.0.0.1:43183 user@vps
+./nuwa-bridge-linux-arm64.run access
 ```
 
-The setup command prints a Nuwa OAuth authorization URL and opens a loopback callback listener at port 43183. When operating a remote Linux host, establish an SSH local port forward for 43183 to the host before opening the authorization URL on the administrator's workstation. Complete authorization in the browser, select the assistant's exact canonical address, scan the QR code shown directly in the SSH terminal with the authorized company LINE account, confirm login and enter the temporary PIN in LINE when prompted, and select Open, Friends, or Allowlist at the access policy prompt. Treat the QR and PIN as credentials and keep them private. Once Nuwa OAuth finishes, the temporary callback port closes; an SSH forward may report connection refused for subsequent browser requests. LINE login uses a separate connection.
+| Private policy | Eligible senders |
+| --- | --- |
+| Open | Any sender whose private message LINE delivers; requires confirmation. |
+| Friends | Contacts on the company's LINE friend list, excluding blocked contacts. |
+| Allowlist | Selected native contact IDs. |
 
-The default private data directory is `~/.config/nuwa-agent-relay-bridge`. The `NUWA_BRIDGE_HOME` environment variable selects a separate directory. The directory contains authorization material, LINE session state, configuration and the SQLite delivery database; protect and back it up as sensitive data. Start one process per directory. Stop a running process with SIGINT or SIGTERM. The operating system releases the process lock on normal exit, crash or reboot. The lock file remains on disk to preserve its inode; keep it in place while using the current executable. Stop any earlier bridge version before upgrading.
+Manage the company's contacts and blocking in LINE itself.
 
-## Access and upgrades
+### Groups
 
-Stop the existing bridge using Ctrl+C. Run the new executable with `status` to verify the existing database and check for unresolved work, then run it with `access` to choose the access policy. Preserve the private data directory and its account authorization. Upgrades from the single-user pilot retain its approved sender until the administrator selects a policy. Complete pending submissions on the old executable before migrating its database. Keep a private backup of the data directory while stopped. The new executable accepts ordinary messages; end users need no pairing code.
+Join the company account to the desired LINE group using LINE. Run:
 
-Start the bridge after changing access. Open mode requires explicit confirmation; select Friends when the company account maintains its own friend list, or Allowlist to choose specific contacts. LINE's own privacy controls govern friend additions and blocking.
+```sh
+./nuwa-bridge-linux-arm64.run groups
+```
 
-## Group access
+Choose Disabled, Open (all joined groups, with confirmation) or Allowlist (selected groups and approved current membership). The default is Disabled. Group access is independent of the private policy. Allowlist membership changes require approval through the same command. The Bridge verifies current membership before submitting a group request or delivering a reply.
 
-Join the company LINE account to the desired internal group using the LINE app. Stop the bridge and run the executable with `groups`. Choose 3 (Allowlist), select the joined group by number, and restart. The private access policy remains unchanged. Group membership changes require running `groups` again to approve the new membership. The changed audience starts a new Relay conversation; replies to earlier audiences remain blocked. All group members can address the assistant regardless of private friend status.
+A verified group of two, including the Bridge, accepts ordinary incoming messages. In larger groups, a genuine native @Mention, @All or quote of the assistant's previous reply activates the assistant; unrelated chatter remains local. The Bridge verifies the audience at intake and before submission. See the [handoff](Handoff.md#group-activation-by-audience-size).
 
-In the group, use LINE's native @Mention to select the company account and ask a question. Quote the assistant's reply to continue without another mention. Normal group chatter and @Everyone stay local. The bridge forwards only addressed messages and replies in the original group. Keep group participants informed and verify that the assistant's native context and tool permissions are suitable for the group.
+Restart after completing configuration.
 
-Group membership is verified using the authenticated joined-group directory, matching group MID, explicit member map and account membership. Roster diagnostics include the safe chat-type representation and member count where available. The logs report a reason and member count when available, without listing member identifiers or message content. Open group access still requires a verified current roster.
+## 4. Daily conversations and replies
 
-## Acceptance
+Use ordinary private chat or the supported group trigger. Replies arrive in the original native conversation.
 
-Send an ordinary question, receive its reply, and ask a follow-up without quoting. Verify the same Relay Thread. Have a second permitted person add the company account and chat normally. Interleave the two conversations and verify that the replies and AI context stay isolated. Send a LINE sticker and verify the corresponding Relay message and public image link. Send a private image and confirm its content-type notice. Use `/new <message>` for a distinct topic; quote an earlier AI reply to continue that specific thread. Restart and repeat the continuation. Verify that a sender excluded by Friends or Allowlist cannot trigger work, and that revoked access prevents a delayed reply. 
+| Action | Effect |
+| --- | --- |
+| Follow up in the same chat | Continue its active Relay Thread. |
+| Quote an earlier assistant reply | Select that reply's original Relay Thread. |
+| Send `/new <message>` | Create a separate Relay Thread (use a valid group trigger in a group). |
+| Change a group's membership | Start a new audience-specific thread after authorization. |
 
+The assistant receives text and supported sticker artifact links. Private media currently produces a type notice. AI context and tool permissions depend on the receiving platform; verify isolation for every intended participant.
 
-`./nuwa-bridge-linux-arm64.run status` (or the x64 executable with the same command) reports the bridge address, designated assistant, access mode and pending, blocked or uncertain delivery counts. Reconcile uncertain sends using actual native delivery evidence before taking recovery action.
+## 5. Maintain and upgrade
 
-The Relay inbox exposes a bounded window of 100 messages. The pilot detects a saturated window without a retained checkpoint and requires reconciliation. Continuous event replay and recovery from arbitrary offline intervals require a durable paginated or Wake-based receive contract.
+Stop the service, inspect its status and reconcile unresolved work.
 
-Real account login and live cross-platform delivery are acceptance gates for production deployment. Pilot releases enable this testing. The automated test suite covers the core with controlled external boundaries.
+```sh
+./nuwa-bridge-linux-arm64.run status
+```
+
+Status reports the Bridge address, designated assistant, access modes and pending, blocked and uncertain delivery counts. Back up the private data directory while stopped and restrict access to the backup. Download the new matching executable to a temporary filename, verify its checksum, make it executable and replace the installed executable. Start it using the same data directory. This retains the account, OAuth, policies and delivery history. The database records its routing schema version; older executables cannot open the migrated identity. Keep the pre-upgrade backup for an authorized rollback.
+
+### Change the designated assistant
+
+Stop the service, complete pending submissions and reconcile uncertain native deliveries. Run:
+
+```sh
+./nuwa-bridge-linux-arm64.run assistant
+```
+
+Enter the new assistant's canonical address, such as `nuwainfo/ava/main`, and confirm with `yes`. The command resolves the address in the same organization, preserves the Bridge's OAuth and LINE identity, policies and history, and starts a new routing generation. Delayed replies and quotes from the former generation are withheld. Start the service and verify an ordinary private and group conversation with the new assistant.
+
+## 6. Run as a background service
+
+systemd is the Linux service manager. Install the supplied [user service unit](nuwa-bridge.service) as `~/.config/systemd/user/nuwa-bridge.service`. The unit expects a stable executable path at `~/.local/bin/nuwa-bridge`; point that path to the installed standalone executable (a symbolic link is sufficient).
+
+```sh
+mkdir -p ~/.local/bin ~/.config/systemd/user
+ln -s "$HOME/nuwa-bridge/nuwa-bridge-linux-arm64.run" ~/.local/bin/nuwa-bridge
+systemctl --user daemon-reload
+systemctl --user enable --now nuwa-bridge
+```
+
+Enable user lingering with `sudo loginctl enable-linger "$USER"` when the host should run the service before login. The unit restarts failed processes. Inspect operation with `systemctl --user status nuwa-bridge` and `journalctl --user -u nuwa-bridge -f`. Stop it with `systemctl --user stop nuwa-bridge` before configuration or upgrade, then start it again. Confirm automatic startup and restart on the actual host.
+
+## 7. Verify operation and diagnose failures
+
+Send a permitted request and observe an actual reply in the original LINE conversation. Follow up and verify the same Relay Thread; use a second authorized chat and interleave replies. For a two-member group, send an ordinary message. For a larger group, verify ambient chatter remains local, then use a native mention, @All and a quote of the reply. Verify excluded chats and changed group audiences are protected. See [TESTING.md](../TESTING.md) for the complete acceptance scope.
+
+| Log or evidence | Meaning |
+| --- | --- |
+| `/native/message/received` | Bridge accepted a native event for processing. |
+| `/group/roster/verified` | Native group ID and actual membership were verified. |
+| `/relay/message/submitted` | Relay accepted the message and returned Message and Thread IDs. |
+| `/native/message/delivered` | LINE acknowledged native reply submission. |
+| `/group/roster/rejected`, `/group/access/rejected` | Inspect the safe reason and member count; verify joined group and access policy. |
+| Blocked or uncertain counts | Inspect the authorization or reconcile actual delivery evidence before retrying. |
+
+Relay submission and Wake acceptance are intermediate evidence. Verify AI handling and the final LINE reply in the original chat. The current Inbox is bounded to 100 messages; reconcile a saturated window without a known checkpoint before resuming. Keep credentials and private message contents out of diagnostic reports.

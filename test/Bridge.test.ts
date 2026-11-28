@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 
 import { Bridge } from '../src/Bridge.js';
@@ -13,18 +14,18 @@ import { DeliveryStore } from '../src/DeliveryStore.js';
 
 class ControlledRelay implements RelayClient
 {
-  readonly submissions: { id: string; thread: string; body: string; replyTo?: string; artifactLinks?: string[] }[] = [];
+  readonly submissions: { id: string; thread: string; body: string; replyTo?: string; artifactLinks?: string[]; to?: string }[] = [];
   readonly messages: RelayMessage[] = [];
   failAfterAccept = false;
 
-  async send(_to: string, body: string, id: string, artifactLinks?: string[]): Promise<RelaySubmission>
+  async send(to: string, body: string, id: string, artifactLinks?: string[]): Promise<RelaySubmission>
   {
     const prior = this.submissions.find(item => item.id === id);
     const thread = prior?.thread ?? 'thread-' + id;
 
     if (!prior)
     {
-      this.submissions.push({ id, thread, body, artifactLinks });
+      this.submissions.push({ id, thread, body, artifactLinks, to });
     }
 
     if (this.failAfterAccept)
@@ -105,6 +106,7 @@ class Scenario
     recipientAddress: 'example/may/main', recipientSessionID: 'assistant-session',
   };
 
+  private binding = Scenario.binding;
   readonly dir = mkdtempSync(join(tmpdir(), 'nuwa-bridge-'));
   readonly relay = new ControlledRelay();
   readonly messaging = new ControlledMessaging();
@@ -122,12 +124,12 @@ class Scenario
 
   private open(): DeliveryStore
   {
-    return new DeliveryStore(join(this.dir, 'delivery.sqlite3'), Scenario.binding);
+    return new DeliveryStore(join(this.dir, 'delivery.sqlite3'), this.binding);
   }
 
   private createBridge(): Bridge
   {
-    return new Bridge(Scenario.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
+    return new Bridge(this.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
       new GroupPolicy(this.groupSettings, this.messaging, Scenario.binding.accountID));
   }
 
@@ -138,7 +140,30 @@ class Scenario
     this.bridge = this.createBridge();
   }
 
-  request(id: string, body: string, quote?: string, senderID = 'employee', artifactLinks?: string[]): boolean
+  restartFromPreviousSchema(): void
+  {
+    this.store.close();
+
+    const database = new DatabaseSync(join(this.dir, 'delivery.sqlite3'));
+    database.exec('DROP TABLE assistant_state; DROP TABLE thread_assistants; DROP TABLE inbound_group_audiences;');
+    database.prepare('UPDATE bridge_binding SET value = ? WHERE id = 1').run(JSON.stringify([
+      this.binding.sessionID, this.binding.accountID, this.binding.recipientSessionID, this.binding.recipientAddress,
+    ]));
+    database.close();
+
+    this.store = this.open();
+    this.bridge = this.createBridge();
+  }
+
+  switchAssistant(recipientSessionID: string, recipientAddress: string): void
+  {
+    const next = { ...this.binding, recipientSessionID, recipientAddress };
+    this.store.prepareAssistantSwitch(next);
+    this.binding = next;
+    this.restart();
+  }
+
+  request(id: string, body: string, quote?: string, senderID = 'employee', artifactLinks?: string[]): Promise<boolean>
   {
     const message: NativeMessage = {
       messageID: id, senderID, conversationID: senderID, body, replyToID: quote, artifactLinks,
@@ -146,7 +171,7 @@ class Scenario
     return this.bridge.receive(message);
   }
 
-  groupRequest(id: string, groupID: string, senderID: string, body: string, mention = false, quote?: string): boolean
+  groupRequest(id: string, groupID: string, senderID: string, body: string, mention = false, quote?: string): Promise<boolean>
   {
     return this.bridge.receive({
       messageID: id, conversationID: ConversationAddress.group(groupID), senderID,
@@ -174,7 +199,7 @@ test('employee receives delayed report and quotes it after restarting, while new
   const s = new Scenario();
   t.after(() => s.close());
 
-  assert.equal(s.request('request-1', 'Prepare report'), true);
+  assert.equal(await s.request('request-1', 'Prepare report'), true);
   await s.bridge.cycle();
   const thread = s.relay.submissions[0]!.thread;
   s.restart();
@@ -185,8 +210,8 @@ test('employee receives delayed report and quotes it after restarting, while new
 
   assert.deepEqual(s.messaging.deliveries, [{ conversation: 'employee', body: 'Report ready', id: 'line-1' }]);
 
-  s.request('request-2', 'Include invoices', 'line-1');
-  s.request('request-3', '/new Check website');
+  await s.request('request-2', 'Include invoices', 'line-1');
+  await s.request('request-3', '/new Check website');
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions[1]!.thread, thread);
@@ -199,14 +224,14 @@ test('lost Relay response and repeated native event preserve one submission acro
   const s = new Scenario();
   t.after(() => s.close());
 
-  s.request('request-1', 'Prepare report');
+  await s.request('request-1', 'Prepare report');
   s.relay.failAfterAccept = true;
 
   await assert.rejects(s.bridge.cycle(), /lost response/);
   const id = s.relay.submissions[0]!.id;
   s.restart();
 
-  s.request('request-1', 'Prepare report');
+  await s.request('request-1', 'Prepare report');
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 1);
@@ -223,7 +248,7 @@ test('uncertain native send is preserved for reconciliation rather than sent twi
   const s = new Scenario();
   t.after(() => s.close());
 
-  s.request('request-1', 'Prepare report');
+  await s.request('request-1', 'Prepare report');
   await s.bridge.cycle();
   s.answer(s.relay.submissions[0]!.thread);
   s.messaging.failAfterSend = true;
@@ -242,12 +267,12 @@ test('unauthorized messages, unknown quotes, and unrelated Relay replies are iso
   const s = new Scenario();
   t.after(() => s.close());
 
-  assert.equal(s.bridge.receive({ messageID: 'bad', senderID: 'stranger',
+  assert.equal(await s.bridge.receive({ messageID: 'bad', senderID: 'stranger',
     conversationID: 'stranger', body: 'Export payroll' }), false);
-  assert.equal(s.bridge.receive({ messageID: 'self', senderID: 'company-line',
+  assert.equal(await s.bridge.receive({ messageID: 'self', senderID: 'company-line',
     conversationID: 'employee', body: 'Loop' }), false);
-  s.request('unknown', 'Continue', 'unknown-native-id');
-  s.request('request-1', 'Prepare report');
+  await s.request('unknown', 'Continue', 'unknown-native-id');
+  await s.request('request-1', 'Prepare report');
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 1);
@@ -279,14 +304,14 @@ test('ordinary follow-up continues the same conversation without quoting', async
   const s = new Scenario();
   t.after(() => s.close());
 
-  s.request('first', 'What model are you?');
+  await s.request('first', 'What model are you?');
   await s.bridge.cycle();
   const thread = s.relay.submissions[0]!.thread;
   s.answer(thread);
   await s.bridge.cycle();
   s.restart();
 
-  s.request('follow-up', 'Which version?');
+  await s.request('follow-up', 'Which version?');
   await s.bridge.cycle();
   assert.equal(s.relay.submissions[1]!.thread, thread);
 });
@@ -296,8 +321,8 @@ test('two first-time LINE senders chat normally and delayed answers return to th
   const s = new Scenario({ mode: AccessMode.Open, allowed_user_ids: [] });
   t.after(() => s.close());
 
-  s.request('a1', 'First question', undefined, 'alice');
-  s.request('b1', 'Other question', undefined, 'bob');
+  await s.request('a1', 'First question', undefined, 'alice');
+  await s.request('b1', 'Other question', undefined, 'bob');
   await s.bridge.cycle();
 
   const alice = s.relay.submissions[0]!.thread;
@@ -311,8 +336,8 @@ test('two first-time LINE senders chat normally and delayed answers return to th
 
   assert.deepEqual(s.messaging.deliveries.map(item => item.conversation), ['bob', 'alice']);
 
-  s.request('a2', 'Follow up', undefined, 'alice');
-  s.request('b2', 'Cross-chat quote', 'line-2', 'bob');
+  await s.request('a2', 'Follow up', undefined, 'alice');
+  await s.request('b2', 'Cross-chat quote', 'line-2', 'bob');
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions[2]!.thread, alice);
@@ -325,8 +350,8 @@ test('friend access follows the company contact directory and revoked contacts r
   const s = new Scenario({ mode: AccessMode.Friends, allowed_user_ids: [] });
   t.after(() => s.close());
 
-  s.request('stranger', 'Not a friend', undefined, 'stranger');
-  s.request('friend', 'Hello');
+  await s.request('stranger', 'Not a friend', undefined, 'stranger');
+  await s.request('friend', 'Hello');
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 1);
@@ -351,12 +376,12 @@ test('sticker link remains attached to the exact conversation and retries reuse 
   const s = new Scenario();
   t.after(() => s.close());
 
-  s.request('first', 'Hello');
+  await s.request('first', 'Hello');
   await s.bridge.cycle();
   const thread = s.relay.submissions[0]!.thread;
   const links = ['https://stickershop.line-scdn.net/stickershop/v1/sticker/1/android/sticker.png'];
 
-  s.request('sticker', '[LINE sticker]', undefined, 'employee', links);
+  await s.request('sticker', '[LINE sticker]', undefined, 'employee', links);
   s.relay.failAfterAccept = true;
   await assert.rejects(s.bridge.cycle(), /lost response/);
   s.restart();
@@ -380,13 +405,13 @@ test('company group members mention the assistant and quote its reply without mi
   s.messaging.groups.set('project', members);
   s.messaging.groups.set('external', members);
 
-  assert.equal(s.groupRequest('ordinary', 'company', 'employee', 'Casual conversation'), false);
-  assert.equal(s.groupRequest('external', 'external', 'employee', '@AI secret?', true), false);
-  assert.equal(s.groupRequest('loop', 'company', 'company-line', '@AI own reply', true), false);
+  await s.groupRequest('ordinary', 'company', 'employee', 'Casual conversation');
+  assert.equal(await s.groupRequest('external', 'external', 'employee', '@AI secret?', true), false);
+  assert.equal(await s.groupRequest('loop', 'company', 'company-line', '@AI own reply', true), false);
 
-  assert.equal(s.groupRequest('mention', 'company', 'coworker', '@AI report', true), true);
-  s.request('private', 'Private question');
-  s.groupRequest('project-1', 'project', 'employee', '@AI project status', true);
+  assert.equal(await s.groupRequest('mention', 'company', 'coworker', '@AI report', true), true);
+  await s.request('private', 'Private question');
+  await s.groupRequest('project-1', 'project', 'employee', '@AI project status', true);
   await s.bridge.cycle();
 
   const company = s.relay.submissions[0]!.thread;
@@ -405,9 +430,9 @@ test('company group members mention the assistant and quote its reply without mi
   assert.deepEqual(s.messaging.deliveries.map(item => item.conversation),
     ['group:company', 'employee', 'group:project']);
 
-  assert.equal(s.groupRequest('foreign-quote', 'project', 'employee', 'Cross-group quote', false, 'line-1'), false);
-  assert.equal(s.groupRequest('own-quote', 'company', 'employee', 'Which version?', false, 'line-1'), true);
-  s.groupRequest('mention-again', 'project', 'employee', '@AI update', true);
+  assert.equal(await s.groupRequest('foreign-quote', 'project', 'employee', 'Cross-group quote', false, 'line-1'), false);
+  assert.equal(await s.groupRequest('own-quote', 'company', 'employee', 'Which version?', false, 'line-1'), true);
+  await s.groupRequest('mention-again', 'project', 'employee', '@AI update', true);
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions[3]!.thread, company);
@@ -422,7 +447,7 @@ test('group access remains disabled until configured and changed membership bloc
   t.after(() => disabled.close());
   disabled.messaging.groups.set('company', members);
 
-  assert.equal(disabled.groupRequest('ignored', 'company', 'employee', '@AI hello', true), false);
+  assert.equal(await disabled.groupRequest('ignored', 'company', 'employee', '@AI hello', true), false);
 
   const s = new Scenario(undefined, {
     mode: GroupMode.Allowlist, approved_groups: [{ id: 'company', member_ids: members }],
@@ -430,8 +455,8 @@ test('group access remains disabled until configured and changed membership bloc
   t.after(() => s.close());
 
   s.messaging.groups.set('company', members);
-  s.groupRequest('outsider', 'company', 'outsider', '@AI hello', true);
-  s.groupRequest('approved', 'company', 'employee', '@AI report', true);
+  await s.groupRequest('outsider', 'company', 'outsider', '@AI hello', true);
+  await s.groupRequest('approved', 'company', 'employee', '@AI report', true);
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 1);
@@ -439,7 +464,7 @@ test('group access remains disabled until configured and changed membership bloc
 
   s.messaging.groups.set('company', [...members, 'new-member']);
   s.answer(s.relay.submissions[0]!.thread);
-  s.groupRequest('changed', 'company', 'employee', '@AI another report', true);
+  await s.groupRequest('changed', 'company', 'employee', '@AI another report', true);
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 1);
@@ -448,7 +473,7 @@ test('group access remains disabled until configured and changed membership bloc
   assert.equal(s.store.blockedOutbound, 1);
 });
 
-test('explicitly open groups still require current membership and a direct mention', async t =>
+test('explicitly open groups still require verified current membership', async t =>
 {
   const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
   t.after(() => s.close());
@@ -456,8 +481,8 @@ test('explicitly open groups still require current membership and a direct menti
   s.messaging.groups.set('joined', ['company-line', 'employee']);
   s.messaging.groups.set('left', ['employee']);
 
-  s.groupRequest('left', 'left', 'employee', '@AI hello', true);
-  s.groupRequest('joined', 'joined', 'employee', '@AI hello', true);
+  await s.groupRequest('left', 'left', 'employee', '@AI hello', true);
+  await s.groupRequest('joined', 'joined', 'employee', '@AI hello', true);
   await s.bridge.cycle();
 
   assert.equal(s.relay.submissions.length, 1);
@@ -474,13 +499,13 @@ test('a changed group audience starts a separate conversation and cannot receive
   t.after(() => s.close());
 
   s.messaging.groups.set('company', ['company-line', 'employee']);
-  s.groupRequest('old', 'company', 'employee', '@AI prepare report', true);
+  await s.groupRequest('old', 'company', 'employee', '@AI prepare report', true);
   await s.bridge.cycle();
 
   const oldThread = s.relay.submissions[0]!.thread;
 
   s.messaging.groups.set('company', ['company-line', 'employee', 'new-member']);
-  s.groupRequest('new', 'company', 'new-member', '@AI hello', true);
+  await s.groupRequest('new', 'company', 'new-member', '@AI hello', true);
   s.answer(oldThread, 'old-answer');
   await s.bridge.cycle();
 
@@ -494,4 +519,198 @@ test('a changed group audience starts a separate conversation and cannot receive
 
   assert.equal(s.messaging.deliveries.length, 1);
   assert.equal(s.messaging.deliveries[0]!.conversation, 'group:company');
+});
+
+test('an authorized two-member group chats normally and a larger group only forwards addressed messages', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  await s.groupRequest('first', 'company', 'employee', 'Hello');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 1);
+  const firstThread = s.relay.submissions[0]!.thread;
+  s.answer(firstThread);
+  await s.bridge.cycle();
+
+  await s.groupRequest('follow-up', 'company', 'employee', 'What about tomorrow?');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[1]!.thread, firstThread);
+
+  s.messaging.groups.set('company', ['company-line', 'employee', 'coworker']);
+  await s.groupRequest('chatter', 'company', 'employee', 'Lunch?');
+  await s.groupRequest('addressed', 'company', 'coworker', '@All report', true);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 3);
+  assert.notEqual(s.relay.submissions[2]!.thread, firstThread);
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  await s.groupRequest('small-again', 'company', 'employee', 'Continue');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 4);
+  assert.notEqual(s.relay.submissions[3]!.thread, s.relay.submissions[2]!.thread);
+});
+
+test('switching the assistant preserves the account, starts new conversations and protects former routes', async t =>
+{
+  const s = new Scenario();
+  t.after(() => s.close());
+
+  await s.request('chief-request', 'Prepare report');
+  await s.bridge.cycle();
+  const chiefThread = s.relay.submissions[0]!.thread;
+  s.answer(chiefThread, 'chief-answer');
+  await s.bridge.cycle();
+
+  s.switchAssistant('ava-session', 'example/ava/main');
+  await s.request('old-quote', 'Continue old work', 'line-1');
+  await s.request('ava-request', 'Hello Ava');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 2);
+  const ava = s.relay.submissions[1]!;
+  assert.equal(ava.to, 'example/ava/main');
+  assert.notEqual(ava.thread, chiefThread);
+
+  s.answer(chiefThread, 'former-assistant-late');
+  s.answer(ava.thread, 'wrong-ava-sender');
+  s.answer(ava.thread, 'ava-answer', 'ava-session');
+  await s.bridge.cycle();
+
+  assert.equal(s.messaging.deliveries.length, 2);
+  assert.equal(s.messaging.deliveries[1]!.conversation, 'employee');
+
+  await s.request('ava-follow-up', 'Tomorrow?', 'line-2');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[2]!.thread, ava.thread);
+
+  s.switchAssistant('assistant-session', 'example/may/main');
+  await s.request('switch-back', 'New request');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[3]!.to, 'example/may/main');
+  assert.notEqual(s.relay.submissions[3]!.thread, chiefThread);
+  assert.notEqual(s.relay.submissions[3]!.thread, ava.thread);
+});
+
+test('pending submissions prevent an assistant switch until original work is reconciled', async t =>
+{
+  const s = new Scenario();
+  t.after(() => s.close());
+
+  await s.request('pending', 'Prepare report');
+  assert.throws(() => s.switchAssistant('ava-session', 'example/ava/main'), /pending/i);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[0]!.to, 'example/may/main');
+
+  s.switchAssistant('ava-session', 'example/ava/main');
+  await s.request('new', 'Hello Ava');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[1]!.to, 'example/ava/main');
+});
+
+test('unaddressed large-group chatter stays local even when the audience shrinks before submission', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+
+  s.messaging.groups.set('company', ['company-line', 'employee', 'coworker']);
+  await s.groupRequest('ambient', 'company', 'employee', 'Lunch?');
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 0);
+
+  await s.groupRequest('ambient', 'company', 'employee', 'Lunch?');
+  await s.groupRequest('small-chat', 'company', 'employee', 'Hello assistant');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 1);
+  assert.match(s.relay.submissions[0]!.body, /Hello assistant/);
+});
+
+test('a group message accepted for one audience is withheld after membership changes before submission', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  await s.groupRequest('addressed', 'company', 'employee', '@AI prepare report', true);
+
+  s.messaging.groups.set('company', ['company-line', 'employee', 'new-member']);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 0);
+  assert.equal(s.store.blocked, 1);
+});
+
+test('an installed bridge upgrades with existing private and group threads and cuts over without losing their history', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+
+  await s.request('before-private', 'Private report');
+  await s.groupRequest('before-group', 'company', 'employee', '@AI group report', true);
+  await s.bridge.cycle();
+
+  const privateThread = s.relay.submissions[0]!.thread;
+  const groupThread = s.relay.submissions[1]!.thread;
+  s.answer(privateThread, 'private-before');
+  s.answer(groupThread, 'group-before');
+  await s.bridge.cycle();
+
+  s.restartFromPreviousSchema();
+  await s.request('after-private', 'Private follow-up', 'line-1');
+  await s.groupRequest('after-group', 'company', 'employee', 'Group follow-up', false, 'line-2');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[2]!.thread, privateThread);
+  assert.equal(s.relay.submissions[3]!.thread, groupThread);
+
+  s.switchAssistant('ava-session', 'example/ava/main');
+  await s.request('new-private', 'Private hello');
+  await s.groupRequest('new-group', 'company', 'employee', 'Group hello');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[4]!.to, 'example/ava/main');
+  assert.equal(s.relay.submissions[5]!.to, 'example/ava/main');
+  assert.equal(new Set([privateThread, groupThread, s.relay.submissions[4]!.thread,
+    s.relay.submissions[5]!.thread]).size, 4);
+
+  s.answer(groupThread, 'former-group-reply');
+  await s.bridge.cycle();
+
+  assert.equal(s.messaging.deliveries.length, 2);
+  assert.equal(s.store.blockedOutbound, 1);
+});
+
+test('uncertain native delivery prevents switching to a different assistant', async t =>
+{
+  const s = new Scenario();
+  t.after(() => s.close());
+
+  await s.request('request', 'Prepare report');
+  await s.bridge.cycle();
+  s.answer(s.relay.submissions[0]!.thread);
+  s.messaging.failAfterSend = true;
+
+  await assert.rejects(s.bridge.cycle(), /uncertain native delivery/);
+  assert.throws(() => s.switchAssistant('ava-session', 'example/ava/main'), /uncertain native deliveries/);
+
+  await s.request('follow-up', 'Still waiting');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[1]!.thread, s.relay.submissions[0]!.thread);
+  assert.equal(s.store.unresolved, 1);
 });

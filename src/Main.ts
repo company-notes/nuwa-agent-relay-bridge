@@ -62,12 +62,7 @@ class Application
     try
     {
       const address = (await input.question('Designated assistant canonical address: ')).trim();
-      const recipient = await this.relay.resolve(address);
-
-      if (identity.sessionID === recipient.id || identity.canonical.split('/')[0] !== address.split('/')[0])
-      {
-        throw new BridgeError('Select a different assistant in the same organization.');
-      }
+      const recipient = await this.resolveAssistant(identity.sessionID, identity.canonical, address);
 
       const line = await LineBackend.connect(this.storage, true);
 
@@ -85,6 +80,73 @@ class Application
       {
         line.stop();
       }
+    }
+    finally
+    {
+      input.close();
+    }
+  }
+
+  private async resolveAssistant(sessionID: string, canonical: string, address: string)
+  {
+    const recipient = await this.relay.resolve(address);
+
+    if (sessionID === recipient.id || canonical.split('/')[0] !== recipient.canonical.split('/')[0])
+    {
+      throw new BridgeError('Select a different assistant in the same organization.');
+    }
+
+    return recipient;
+  }
+
+  private async configureAssistant(): Promise<void>
+  {
+    const config = this.config.read();
+
+    await this.relay.verifyIdentity(config.session_id, config.canonical);
+
+    const input = createInterface({ input: process.stdin, output: process.stdout });
+
+    try
+    {
+      console.log('Current assistant:', config.recipient_address);
+      const address = (await input.question('New assistant canonical address: ')).trim();
+      const recipient = await this.resolveAssistant(config.session_id, config.canonical, address);
+
+      if (recipient.id === config.recipient_session_id && recipient.canonical === config.recipient_address)
+      {
+        console.log('Assistant is unchanged.');
+        return;
+      }
+
+      console.log('New conversations use the selected assistant. Delayed replies and quotes from former routes are withheld.');
+      const confirmation = (await input.question('Switch assistant? Type yes to confirm: ')).trim().toLowerCase();
+
+      if (confirmation !== 'yes')
+      {
+        console.log('Assistant is unchanged.');
+        return;
+      }
+
+      const next = { ...config, recipient_session_id: recipient.id, recipient_address: recipient.canonical };
+      const path = join(this.directory, 'delivery.sqlite3');
+      const store = new DeliveryStore(path, this.config.binding(config));
+
+      try
+      {
+        store.prepareAssistantSwitch(this.config.binding(next));
+        this.config.write(next);
+      }
+      finally
+      {
+        store.close();
+      }
+
+      const switched = new DeliveryStore(path, this.config.binding(next));
+      switched.close();
+
+      console.log('Designated assistant:', next.recipient_address);
+      this.printStart();
     }
     finally
     {
@@ -167,15 +229,18 @@ class Application
         new GroupPolicy(config.groups ?? GroupPolicy.disabled, line, binding.accountID));
 
       let stopped = false;
+      let receiveFailure: unknown;
       const stop = () => { stopped = true; line.stop(); };
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);
 
       try
       {
-        line.listen(message => { bridge.receive(message); }, error =>
+        line.listen(async message => { await bridge.receive(message); }, error =>
         {
+          receiveFailure = error;
           Application.logger.failure('native_receive_failed', error);
+
           stop();
         });
         console.log('Bridge running:', config.canonical);
@@ -201,7 +266,13 @@ class Application
         process.removeListener('SIGINT', stop);
         process.removeListener('SIGTERM', stop);
         stop();
+        await line.drain();
         store.close();
+      }
+
+      if (receiveFailure !== undefined)
+      {
+        throw receiveFailure;
       }
     }
     finally
@@ -243,21 +314,15 @@ class Application
 
     if (!command || command === '--help' || command === 'help')
     {
-      console.log('Usage: nuwa-bridge <setup | access | groups | start | status | --version>');
+      console.log('Usage: nuwa-bridge <setup | access | groups | assistant | start | status | --version>');
       return;
     }
 
     this.initialize();
 
-    if (command === 'status')
+    if (!['setup', 'access', 'groups', 'assistant', 'start', 'status'].includes(command))
     {
-      this.status();
-      return;
-    }
-
-    if (command !== 'setup' && command !== 'access' && command !== 'groups' && command !== 'start')
-    {
-      throw new BridgeError('Use setup, access, groups, start, or status.');
+      throw new BridgeError('Use setup, access, groups, assistant, start, or status.');
     }
 
     const lockPath = join(this.directory, 'bridge.lock');
@@ -276,6 +341,14 @@ class Application
       else if (command === 'groups')
       {
         await this.configureGroups();
+      }
+      else if (command === 'assistant')
+      {
+        await this.configureAssistant();
+      }
+      else if (command === 'status')
+      {
+        this.status();
       }
       else
       {

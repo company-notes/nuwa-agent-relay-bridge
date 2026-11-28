@@ -49,7 +49,7 @@ test('a real group mention retains its group destination instead of becoming a p
   assert.equal(message?.mentionsAccount, true);
 });
 
-test('a mention of everyone or another person does not activate the company assistant', () =>
+test('a native @Everyone addresses the company assistant while an individual mention of another person does not', () =>
 {
   const event = {
     isMyMessage: false, from: { id: 'u-employee' }, to: { type: 'GROUP', id: 'c-company' },
@@ -57,5 +57,8 @@ test('a mention of everyone or another person does not activate the company assi
     getReplyTarget: () => null, getMentions: () => [{ all: true }, { all: false, mid: 'u-other' }],
   } as unknown as TalkMessage;
 
-  assert.equal(LineMessage.normalize(event, 'u-company')?.mentionsAccount, false);
+  assert.equal(LineMessage.normalize(event, 'u-company')?.mentionsAccount, true);
+
+  const other = { ...event, getMentions: () => [{ all: false, mid: 'u-other' }] } as unknown as TalkMessage;
+  assert.equal(LineMessage.normalize(other, 'u-company')?.mentionsAccount, false);
 });

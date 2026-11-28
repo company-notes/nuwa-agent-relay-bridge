@@ -25,14 +25,20 @@ export class Bridge
     this.router = new ConversationRouter(store);
   }
 
-  receive(message: NativeMessage): boolean
+  async receive(message: NativeMessage): Promise<boolean>
   {
     if (!message.senderID || message.senderID === this.binding.accountID)
     {
       return false;
     }
 
+    if (!message.messageID || !message.body.trim() || message.body.length > 100_000)
+    {
+      throw new BridgeError('Invalid native text message.');
+    }
+
     const groupID = ConversationAddress.groupID(message.conversationID);
+    let receivedAudience: string | undefined;
 
     if (groupID !== undefined)
     {
@@ -43,28 +49,41 @@ export class Bridge
 
       const quote = message.replyToID ? this.store.findQuote(message.replyToID, message.conversationID) : undefined;
       const quotesAssistant = Boolean(quote?.replyMessageID);
-
-      if (!message.mentionsAccount && !quotesAssistant)
-      {
-        return false;
-      }
+      const addressed = Boolean(message.mentionsAccount || quotesAssistant);
 
       if (message.replyToID && !quote)
       {
+        if (!addressed)
+        {
+          return false;
+        }
+
         message = { ...message, replyToID: undefined };
       }
+
+      const audience = await this.groupPolicy.audience(groupID, message.senderID);
+
+      if (!audience)
+      {
+        this.store.reject(message);
+        this.logger.info('/native/message/blocked', { native_message_id: message.messageID });
+        return false;
+      }
+
+      if (!addressed && audience.memberCount !== 2)
+      {
+        this.store.ignore(message);
+        return false;
+      }
+
+      receivedAudience = audience.fingerprint;
     }
     else if (message.senderID !== message.conversationID || !this.policy.accepts(message.senderID))
     {
       return false;
     }
 
-    if (!message.messageID || !message.body.trim() || message.body.length > 100_000)
-    {
-      throw new BridgeError('Invalid native text message.');
-    }
-
-    if (this.store.accept(message))
+    if (this.store.accept(message, receivedAudience))
     {
       this.logger.info('/native/message/received', { native_message_id: message.messageID });
     }
@@ -87,7 +106,16 @@ export class Bridge
         continue;
       }
 
-      const plan = this.router.plan(message, audience);
+      if (message.receivedAudience !== undefined && message.receivedAudience !== audience?.fingerprint)
+      {
+        this.store.block(message.messageID);
+        this.logger.info('/native/message/blocked', {
+          native_message_id: message.messageID, reason: 'audience_changed_before_submission',
+        });
+        continue;
+      }
+
+      const plan = this.router.plan(message, audience?.fingerprint);
 
       if (!plan)
       {
@@ -115,25 +143,33 @@ export class Bridge
 
   private async deliver(message: RelayMessage): Promise<void>
   {
-    if (message.kind !== 'reply' ||
-        message.recipientSessionID !== this.binding.sessionID ||
-        message.senderSessionID !== this.binding.recipientSessionID)
+    if (message.kind !== 'reply' || message.recipientSessionID !== this.binding.sessionID)
     {
       return;
     }
 
-    const conversationID = this.store.findThread(message.threadId);
+    const route = this.store.threadRoute(message.threadId);
 
-    if (!conversationID || this.store.hasOutbound(message.id))
+    if (!route || route.recipientSessionID !== message.senderSessionID || this.store.hasOutbound(message.id))
     {
       return;
     }
 
+    if (!route.active || route.recipientSessionID !== this.binding.recipientSessionID)
+    {
+      this.store.blockOutbound(message);
+      this.logger.info('/native/reply/blocked', {
+        relay_message_id: message.id, relay_thread_id: message.threadId, reason: 'former_assistant',
+      });
+      return;
+    }
+
+    const conversationID = route.conversationID;
     const groupID = ConversationAddress.groupID(conversationID);
     const audience = groupID === undefined ? undefined : await this.groupPolicy.audience(groupID);
     const permitted = groupID === undefined
       ? await this.policy.permits(conversationID)
-      : audience !== undefined && audience === this.store.threadAudience(message.threadId);
+      : audience !== undefined && audience.fingerprint === this.store.threadAudience(message.threadId);
 
     if (!permitted)
     {
