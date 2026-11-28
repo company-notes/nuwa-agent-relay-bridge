@@ -53,7 +53,8 @@ export class BridgeConfiguration
     }
 
     // Normalize deployed roster-based selections to stable group identities.
-    config.groups = { ...config.groups!, approved_groups: config.groups!.approved_groups.map(group => ({ id: group.id })) };
+    const groups = config.groups ?? GroupPolicy.disabled;
+    config.groups = { ...groups, approved_groups: groups.approved_groups.map(group => ({ id: group.id })) };
 
     if (config.conversation)
     {

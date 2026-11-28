@@ -44,7 +44,7 @@ export class GroupActivationPolicy
     GroupActivationPolicy.validate(settings);
     const allowed = new Set(groupSettings.approved_groups.map(group => group.id));
 
-    return new Set(settings.approved_groups.filter(group => groupSettings.mode === GroupMode.Open || allowed.has(group.id))
+    return new Set(settings.approved_groups.filter(group => GroupPolicy.allows(group.id, groupSettings.mode, allowed))
       .map(group => group.id));
   }
 

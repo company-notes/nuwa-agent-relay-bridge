@@ -166,6 +166,36 @@ class Scenario
     this.bridge = this.createBridge();
   }
 
+  restartFromRosterSchema(): void
+  {
+    this.store.close();
+
+    const database = new DatabaseSync(join(this.dir, 'delivery.sqlite3'));
+
+    try
+    {
+      database.exec(`
+        ALTER TABLE group_dialogue ADD COLUMN audience TEXT NOT NULL DEFAULT 'old-roster';
+        CREATE TABLE group_thread_audiences (thread_id TEXT PRIMARY KEY, audience TEXT NOT NULL);
+        CREATE TABLE inbound_group_audiences (message_id TEXT PRIMARY KEY, audience TEXT NOT NULL);
+        INSERT INTO group_thread_audiences SELECT thread_id, 'old-roster' FROM thread_routes
+          WHERE conversation_id LIKE 'group:%';
+        INSERT INTO inbound_group_audiences SELECT message_id, 'old-roster' FROM inbound
+          WHERE conversation_id LIKE 'group:%';
+        UPDATE submission_plans SET plan = json_set(plan, '$.audience', 'old-roster')
+          WHERE message_id IN (SELECT message_id FROM inbound_group_audiences);
+        UPDATE bridge_binding SET value = json_set(value, '$.version', 2) WHERE id = 1;
+      `);
+    }
+    finally
+    {
+      database.close();
+    }
+
+    this.store = this.open();
+    this.bridge = this.createBridge();
+  }
+
   switchAssistant(recipientSessionID: string, recipientAddress: string): void
   {
     const next = { ...this.binding, recipientSessionID, recipientAddress };
@@ -1114,4 +1144,66 @@ test('a company group continues natural conversation and delayed replies after m
   assert.equal(s.model.inputs.length, 1);
   assert.match(JSON.stringify(s.model.inputs[0]!.history), /尾牙想吃什麼/);
   assert.match(JSON.stringify(s.model.inputs[0]!.history), /一起吃火鍋/);
+});
+
+test('a v0.1.9 installation preserves the existing group thread, dialogue and retry plan during upgrade', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+
+  const thread = await s.introduce();
+
+  await s.groupRequest('pending-upgrade', 'company', 'employee', '尾牙一起吃飯？');
+  s.relay.failAfterAccept = true;
+  await assert.rejects(s.bridge.cycle(), /lost response/);
+
+  const previous = s.relay.submissions[1]!;
+  const count = s.dialogueCount();
+  s.messaging.groups.set('company', ['company-line', 'employee', 'new-member']);
+  s.restartFromRosterSchema();
+
+  assert.equal(s.dialogueCount(), count);
+  await s.bridge.cycle();
+
+  assert.equal(s.store.pendingCount, 0);
+  assert.deepEqual(s.relay.submissions[1], previous);
+
+  s.answer(thread, 'upgrade-reply', 'assistant-session', '尾牙可以吃火鍋。');
+  await s.bridge.cycle();
+  await s.groupRequest('upgrade-follow-up', 'company', 'new-member', '去哪裡吃呢？');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions[2]!.thread, thread);
+  assert.match(JSON.stringify(s.model.inputs.at(-1)!.history), /尾牙一起吃飯/);
+  assert.match(JSON.stringify(s.model.inputs.at(-1)!.history), /尾牙可以吃火鍋/);
+  assert.equal(s.messaging.deliveries.length, 2);
+
+  const database = new DatabaseSync(join(s.dir, 'delivery.sqlite3'), { readOnly: true });
+
+  try
+  {
+    assert.equal(database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'group_thread_audiences'").get(), undefined);
+    assert.equal(database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'inbound_group_audiences'").get(), undefined);
+    assert.ok(!database.prepare('PRAGMA table_info(group_dialogue)').all().some(column => column.name === 'audience'));
+    assert.equal(database.prepare("SELECT 1 FROM submission_plans WHERE json_type(plan, '$.audience') IS NOT NULL").get(), undefined);
+  }
+  finally
+  {
+    database.close();
+  }
+});
+
+test('a pending group message is withheld when the Bridge itself leaves the group', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  assert.equal(await s.groupRequest('pending', 'company', 'employee', 'Please prepare report'), true);
+
+  s.messaging.groups.delete('company');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 0);
+  assert.equal(s.store.blocked, 1);
 });

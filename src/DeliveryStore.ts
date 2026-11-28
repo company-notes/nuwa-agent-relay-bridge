@@ -74,18 +74,13 @@ export class DeliveryStore
     try
     {
       this.assistant = new AssistantBinding(this.database, binding);
-      this.transaction(() =>
+      this.conversationHistory = this.transaction(() =>
       {
         this.assistant.initialize(this.pendingCount, this.unresolved);
-        this.database.exec(`
-          DROP TABLE IF EXISTS group_thread_audiences;
-          DROP TABLE IF EXISTS inbound_group_audiences;
-          UPDATE submission_plans SET plan = json_remove(plan, '$.audience')
-          WHERE json_type(plan, '$.audience') IS NOT NULL;
-        `);
-      });
+        this.migrateGroupRoutes();
 
-      this.conversationHistory = new ConversationHistory(this.database, this.assistant.generation);
+        return new ConversationHistory(this.database, this.assistant.generation);
+      });
     }
     catch (error)
     {
@@ -99,14 +94,36 @@ export class DeliveryStore
     this.transaction(() => this.assistant.prepare(next, this.pendingCount, this.unresolved));
   }
 
-  private transaction(action: () => void): void
+  private migrateGroupRoutes(): void
+  {
+    const legacy = this.database.prepare(`
+      SELECT 1 FROM sqlite_master WHERE type = 'table'
+      AND name IN ('group_thread_audiences', 'inbound_group_audiences')
+    `).get();
+
+    if (!legacy)
+    {
+      return;
+    }
+
+    this.database.exec(`
+      DROP TABLE IF EXISTS group_thread_audiences;
+      DROP TABLE IF EXISTS inbound_group_audiences;
+      UPDATE submission_plans SET plan = json_remove(plan, '$.audience')
+      WHERE json_type(plan, '$.audience') IS NOT NULL;
+    `);
+  }
+
+  private transaction<T>(action: () => T): T
   {
     this.database.exec('BEGIN IMMEDIATE');
 
     try
     {
-      action();
+      const result = action();
       this.database.exec('COMMIT');
+
+      return result;
     }
     catch (error)
     {

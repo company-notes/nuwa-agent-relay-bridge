@@ -47,6 +47,9 @@ test('an existing pilot upgrade preserves identity and approval until an adminis
   assert.deepEqual(config.read().conversation, { assistant_name: '小媧', approved_groups: [{ id: 'company' }] });
   assert.equal(config.read().access.mode, AccessMode.Open);
 
+  config.write(config.read());
+  assert.equal(JSON.stringify(file.read()).includes('member_ids'), false);
+
   const reopened = new DeliveryStore(databasePath, config.binding(config.read()));
   reopened.close();
 });

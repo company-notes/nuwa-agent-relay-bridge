@@ -48,10 +48,15 @@ export class GroupPolicy
     }
   }
 
+  static allows(groupID: string, mode: GroupMode, selected: ReadonlySet<string>): boolean
+  {
+    return Boolean(groupID) && (mode === GroupMode.Open ||
+      (mode === GroupMode.Allowlist && selected.has(groupID)));
+  }
+
   accepts(groupID: string): boolean
   {
-    return Boolean(groupID) && (this.settings.mode === GroupMode.Open ||
-      (this.settings.mode === GroupMode.Allowlist && this.approvals.has(groupID)));
+    return GroupPolicy.allows(groupID, this.settings.mode, this.approvals);
   }
 
   async membership(groupID: string, senderID?: string): Promise<GroupMembership | undefined>
