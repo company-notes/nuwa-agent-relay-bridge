@@ -598,3 +598,38 @@ test('pending submissions prevent an assistant switch until original work is rec
 
   assert.equal(s.relay.submissions[1]!.to, 'example/ava/main');
 });
+
+test('unaddressed large-group chatter stays local even when the audience shrinks before submission', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+
+  s.messaging.groups.set('company', ['company-line', 'employee', 'coworker']);
+  await s.groupRequest('ambient', 'company', 'employee', 'Lunch?');
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  await s.bridge.cycle();
+  assert.equal(s.relay.submissions.length, 0);
+
+  await s.groupRequest('ambient', 'company', 'employee', 'Lunch?');
+  await s.groupRequest('small-chat', 'company', 'employee', 'Hello assistant');
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 1);
+  assert.match(s.relay.submissions[0]!.body, /Hello assistant/);
+});
+
+test('a group message accepted for one audience is withheld after membership changes before submission', async t =>
+{
+  const s = new Scenario(undefined, { mode: GroupMode.Open, approved_groups: [] });
+  t.after(() => s.close());
+
+  s.messaging.groups.set('company', ['company-line', 'employee']);
+  await s.groupRequest('addressed', 'company', 'employee', '@AI prepare report', true);
+
+  s.messaging.groups.set('company', ['company-line', 'employee', 'new-member']);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 0);
+  assert.equal(s.store.blocked, 1);
+});
