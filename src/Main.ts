@@ -19,6 +19,9 @@ import { OAuthCredentials } from './OAuthCredentials.js';
 import { PrivateJSON } from './PrivateJSON.js';
 import { ProcessLock } from './ProcessLock.js';
 import { RemoteRelayClient } from './RemoteRelayClient.js';
+import { GroupActivationPolicy } from './GroupActivationPolicy.js';
+import { ClefDecisionModel } from './ClefDecisionModel.js';
+import { ConversationSetup } from './ConversationSetup.js';
 
 class Application
 {
@@ -178,6 +181,58 @@ class Application
     });
   }
 
+  private async configureConversation(): Promise<void>
+  {
+    await this.configurePolicy(async (config, line, input) =>
+    {
+      const policy = new GroupPolicy(config.groups ?? GroupPolicy.disabled, line, config.account_id);
+      const setup = new ConversationSetup(input, async () =>
+      {
+        const groups = await line.listGroups();
+        return groups.filter(group => policy.accepts(group.id));
+      });
+
+      const selected = await setup.select(config.conversation);
+
+      if (selected)
+      {
+        config.conversation = selected;
+      }
+      else
+      {
+        delete config.conversation;
+      }
+    });
+  }
+
+  private activation(config: BridgeConfig): GroupActivationPolicy
+  {
+    const settings = config.conversation;
+    const accountID = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const token = process.env.CLOUDFLARE_API_TOKEN;
+
+    if (!settings?.approved_groups.length)
+    {
+      return new GroupActivationPolicy();
+    }
+
+    if (!accountID || !token)
+    {
+      Application.logger.info('/group/conversation/disabled', { reason: 'missing_workers_ai_credentials' });
+      return new GroupActivationPolicy(settings);
+    }
+
+    try
+    {
+      return new GroupActivationPolicy(settings, new ClefDecisionModel(accountID, token));
+    }
+    catch (error)
+    {
+      Application.logger.failure('/group/conversation/disabled', error);
+      return new GroupActivationPolicy(settings);
+    }
+  }
+
   private async configurePolicy(update: (config: BridgeConfig, line: LineBackend, input: Interface) => Promise<void>): Promise<void>
   {
     const config = this.config.read();
@@ -224,9 +279,10 @@ class Application
         throw new BridgeError('LINE account differs from its configured identity.');
       }
 
+      const activation = this.activation(config);
       const store = new DeliveryStore(join(this.directory, 'delivery.sqlite3'), binding);
       const bridge = new Bridge(binding, store, this.relay, line, new AccessPolicy(config.access, line),
-        new GroupPolicy(config.groups ?? GroupPolicy.disabled, line, binding.accountID));
+        new GroupPolicy(config.groups ?? GroupPolicy.disabled, line, binding.accountID), activation);
 
       let stopped = false;
       let receiveFailure: unknown;
@@ -292,6 +348,7 @@ class Application
       console.log('Designated assistant:', config.recipient_address);
       console.log('Access mode:', AccessMode[config.access.mode]);
       console.log('Group mode:', GroupMode[(config.groups ?? GroupPolicy.disabled).mode]);
+      console.log('Natural conversation approved groups:', config.conversation?.approved_groups.length ?? 0);
       console.log('Pending inbound submissions:', store.pendingCount);
       console.log('Blocked inbound messages:', store.blocked);
       console.log('Blocked outbound replies:', store.blockedOutbound);
@@ -314,15 +371,15 @@ class Application
 
     if (!command || command === '--help' || command === 'help')
     {
-      console.log('Usage: nuwa-bridge <setup | access | groups | assistant | start | status | --version>');
+      console.log('Usage: nuwa-bridge <setup | access | groups | conversation | assistant | start | status | --version>');
       return;
     }
 
     this.initialize();
 
-    if (!['setup', 'access', 'groups', 'assistant', 'start', 'status'].includes(command))
+    if (!['setup', 'access', 'groups', 'conversation', 'assistant', 'start', 'status'].includes(command))
     {
-      throw new BridgeError('Use setup, access, groups, assistant, start, or status.');
+      throw new BridgeError('Use setup, access, groups, conversation, assistant, start, or status.');
     }
 
     const lockPath = join(this.directory, 'bridge.lock');
@@ -341,6 +398,10 @@ class Application
       else if (command === 'groups')
       {
         await this.configureGroups();
+      }
+      else if (command === 'conversation')
+      {
+        await this.configureConversation();
       }
       else if (command === 'assistant')
       {

@@ -61,4 +61,5 @@ test('a native @Everyone addresses the company assistant while an individual men
 
   const other = { ...event, getMentions: () => [{ all: false, mid: 'u-other' }] } as unknown as TalkMessage;
   assert.equal(LineMessage.normalize(other, 'u-company')?.mentionsAccount, false);
+  assert.equal(LineMessage.normalize(other, 'u-company')?.mentionsOther, true);
 });

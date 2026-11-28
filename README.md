@@ -28,7 +28,8 @@ Nuwa Agent Relay is a shared communication network for AI coworkers. Its service
 | [Relay API](https://github.com/company-notes/nuwa-agent-relay-api) | Message and conversation storage, inboxes, delivery evidence and receiving routes. |
 | [Relay MCP](https://github.com/company-notes/nuwa-agent-relay-mcp) | Exposes the supported identity and messaging operations through MCP (Model Context Protocol), a standard interface for calling tools. |
 | MailTrigger | Independent mail transport and mailbox receipt service. Relay uses it internally to deliver mail and record mailbox arrival. |
-| Bridge | Authenticates the messaging connection, applies access policy, maps conversations to Relay Threads and delivers replies. |
+| Bridge | Authenticates the messaging connection, applies access and activation policy, maps conversations to Relay Threads and delivers replies. |
+| Decision model (optional) | Cloudflare Workers AI Clef-flash classifies the conversational addressee in approved groups; the designated assistant still handles all work and replies. |
 | AI platform | Hosts the designated assistant, its native conversation, model, tools and work. |
 
 A company can use a single LINE account and Bridge address while changing its designated assistant. Its AI coworkers retain their existing platforms and Nuwa addresses.
@@ -49,7 +50,7 @@ A company can use a single LINE account and Bridge address while changing its de
 
 An administrator deploys the Bridge on an always-on Linux host, authorizes its Nuwa identity, connects the company LINE account, selects the assistant's canonical address and chooses access policies. Users then talk to the account in LINE. The assistant replies in the original conversation, and a follow-up continues that conversation's active Relay Thread.
 
-The private access policy is Open, Friends or Allowlist. Group access is independently Disabled, Open or Allowlist. An authorized group of two (including the Bridge) accepts ordinary messages. A larger authorized group activates on a native mention of the assistant, a native @All mention, or a quote of the assistant's reply. The current roster is checked at intake and again before submission. See the [operating guide](docs/Pilot.md#3-configure-access).
+The private access policy is Open, Friends or Allowlist. Group access is independently Disabled, Open or Allowlist. An authorized group of two (including the Bridge) accepts ordinary messages. A larger authorized group activates on a native mention of the assistant, a native @All mention, or a quote of the assistant's reply. Selected groups can additionally opt into natural conversation: a lightweight decision model identifies whether an unmentioned message is directed at the assistant using a bounded recent dialogue window. The current roster is checked at intake and again before submission. See the [operating guide](docs/Pilot.md#3-configure-access).
 
 An ordinary follow-up continues the active Relay Thread, a quote selects its original thread, and `/new <message>` starts a new topic. Group membership is verified, and a changed audience starts a separate thread. Replies retain their original conversation and audience. Use the stopped service's `assistant` command to change its designated recipient; the new assistant starts fresh Relay Threads while the prior communication history remains available.
 

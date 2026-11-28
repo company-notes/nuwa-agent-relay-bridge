@@ -83,6 +83,26 @@ Choose Disabled, Open (all joined groups, with confirmation) or Allowlist (selec
 
 A verified group of two, including the Bridge, accepts ordinary incoming messages. In larger groups, a genuine native @Mention, @All or quote of the assistant's previous reply activates the assistant; unrelated chatter remains local. The Bridge verifies the audience at intake and before submission. See the [handoff](Handoff.md#group-activation-by-audience-size).
 
+### Natural group conversation (optional)
+
+The `conversation` command enables semantic activation for selected authorized groups and their current member sets. Obtain the members' consent to send bounded group dialogue to Cloudflare Workers AI and to include recent group dialogue as context in accepted Relay requests. This is separate from group access. Existing installations remain mention-based until configured.
+
+Create a dedicated Cloudflare API token scoped to the intended account and Workers AI inference permission. Keep the token private. Set the credentials in the service environment:
+
+```sh
+export CLOUDFLARE_ACCOUNT_ID='your-account-id'
+read -rs -p 'Workers AI API token: ' CLOUDFLARE_API_TOKEN
+echo
+export CLOUDFLARE_API_TOKEN
+./nuwa-bridge-linux-arm64.run conversation
+```
+
+Select the group numbers, enter the assistant's visible chat name (for example `小媧`), and confirm member consent. An empty selection disables the feature. Reconfigure after approving a new membership set.
+
+Start the Bridge from the same environment. For the supplied systemd unit, place the two credential assignments in a private, mode-0600 `~/.config/nuwa-agent-relay-bridge/decision.env` file, reload the unit and start the service. For a custom service data directory, set its EnvironmentFile accordingly. Use a locally trusted editor; never put the token in Git, terminal history or logs.
+
+The model receives only recent text with conversation-local speaker labels (not native ID fields or attachment links). Unrelated dialogue is held in memory for up to ten minutes and twenty turns per group, with a 500-character bound per turn; accepted semantic requests persist their dialogue snapshot as part of the normal delivery record. Explicit native mentions, @All, assistant quotes, private chats and two-member chats bypass inference. When the assistant has spoken within the last four turns or its configured name appears in a short text message, Clef-flash may classify the message. A probability of at least 0.8 activates the assistant. Explicit mentions of other members and replies addressed elsewhere do not use semantic activation. Ambiguous messages remain local. On model failure or missing credentials, explicit activation continues; failures enter a 30-second inference cooldown.
+
 Restart after completing configuration.
 
 ## 4. Daily conversations and replies
@@ -139,6 +159,8 @@ Send a permitted request and observe an actual reply in the original LINE conver
 | --- | --- |
 | `/native/message/received` | Bridge accepted a native event for processing. |
 | `/group/roster/verified` | Native group ID and actual membership were verified. |
+| `/group/conversation/decided` | Model decision with probability and inference elapsed milliseconds; no dialogue text. |
+| `/group/conversation/failed`, `/group/conversation/disabled` | Explicit activation remains available; inspect credentials or model availability. |
 | `/relay/message/submitted` | Relay accepted the message and returned Message and Thread IDs. |
 | `/native/message/delivered` | LINE acknowledged native reply submission. |
 | `/group/roster/rejected`, `/group/access/rejected` | Inspect the safe reason and member count; verify joined group and access policy. |
