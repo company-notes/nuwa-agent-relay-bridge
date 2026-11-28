@@ -118,7 +118,7 @@ class Scenario
 
   constructor(settings: AccessSettings = { mode: AccessMode.Allowlist, allowed_user_ids: ['employee'] },
     private readonly groupSettings: GroupSettings = GroupPolicy.disabled,
-    private readonly conversationSettings?: ConversationSettings, private readonly decision?: ConversationDecision,
+    private conversationSettings?: ConversationSettings, private readonly decision?: ConversationDecision,
     private readonly clock?: () => number)
   {
     this.settings = settings;
@@ -136,6 +136,12 @@ class Scenario
     return new Bridge(this.binding, this.store, this.relay, this.messaging, new AccessPolicy(this.settings, this.messaging),
       new GroupPolicy(this.groupSettings, this.messaging, Scenario.binding.accountID),
       new GroupActivationPolicy(this.conversationSettings, this.decision, this.clock));
+  }
+
+  revokeConversationApproval(): void
+  {
+    this.conversationSettings = undefined;
+    this.restart();
   }
 
   restart(): void
@@ -856,4 +862,104 @@ test('a model outage keeps native mentions and private chats working without for
   assert.equal(s.relay.submissions.length, 3);
   assert.match(s.relay.submissions[1]!.body, /@All 報告/);
   assert.equal(s.relay.submissions[2]!.body, 'Private question');
+});
+
+test('revoked natural-conversation approval blocks a persisted contextual request before Relay submission', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+  await s.introduce();
+
+  await s.groupRequest('pending-greeting', 'company', 'coworker', '妳好啊，改天一起吃飯');
+  assert.equal(s.store.pendingCount, 1);
+
+  s.revokeConversationApproval();
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 1);
+  assert.equal(s.store.blocked, 1);
+
+  await s.groupRequest('explicit-after-revocation', 'company', 'employee', '@小媧 查訂單', true);
+  await s.bridge.cycle();
+
+  assert.equal(s.relay.submissions.length, 2);
+});
+
+test('a native mention of a different member is not overridden by semantic classification', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+  await s.introduce();
+
+  await s.bridge.receive({ messageID: 'other-mention', conversationID: 'group:company',
+    senderID: 'coworker', body: '@Bear 小媧昨天整理的報告你看了嗎？', mentionsOther: true });
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 0);
+  assert.equal(s.relay.submissions.length, 1);
+});
+
+test('a lost Relay response preserves the accepted dialogue snapshot without repeating inference after restart', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+  const thread = await s.introduce();
+
+  await s.groupRequest('natural-retry', 'company', 'coworker', '改天一起吃飯');
+  s.relay.failAfterAccept = true;
+  await assert.rejects(s.bridge.cycle(), /lost response/);
+
+  const submitted = s.relay.submissions[1]!;
+  s.restart();
+  await s.groupRequest('natural-retry', 'company', 'coworker', '改天一起吃飯');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 1);
+  assert.equal(s.relay.submissions.length, 2);
+  assert.deepEqual(s.relay.submissions[1], submitted);
+  assert.equal(submitted.thread, thread);
+});
+
+test('short-term dialogue is bounded, uses local speaker labels, and does not include another group', async t =>
+{
+  const s = new NaturalConversationScenario();
+  t.after(() => s.close());
+  await s.introduce();
+
+  s.model.probability = 0.1;
+  for (let i = 0; i < 22; i++)
+  {
+    await s.groupRequest('ambient-' + i, 'company', 'coworker', '文字' + i + 'x'.repeat(700));
+  }
+
+  await s.groupRequest('other-group', 'project', 'employee', 'OTHER GROUP PRIVATE MARKER', true);
+  await s.groupRequest('named', 'company', 'employee', '小媧，幫我看一下');
+  const input = s.model.inputs.at(-1)!;
+
+  assert.equal(input.history.length, 20);
+  assert.ok(input.history.every(turn => turn.text.length <= 512));
+  assert.ok(input.history.every(turn => !turn.speaker.includes('coworker')));
+  assert.ok(!JSON.stringify(input).includes('OTHER GROUP PRIVATE MARKER'));
+  await s.bridge.cycle();
+});
+
+test('model cooldown suppresses repeated failures and resumes natural classification', async t =>
+{
+  let now = 1000;
+  const s = new NaturalConversationScenario(undefined, () => now);
+  t.after(() => s.close());
+  await s.introduce();
+
+  s.model.fail = true;
+  await s.groupRequest('first-failure', 'company', 'coworker', '妳好啊');
+  await s.groupRequest('during-cooldown', 'company', 'coworker', '小媧，妳好');
+  assert.equal(s.model.inputs.length, 1);
+
+  now += 30_001;
+  s.model.fail = false;
+  await s.groupRequest('recovered', 'company', 'coworker', '小媧，妳好');
+  await s.bridge.cycle();
+
+  assert.equal(s.model.inputs.length, 2);
+  assert.equal(s.relay.submissions.length, 2);
 });

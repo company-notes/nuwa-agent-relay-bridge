@@ -6,6 +6,7 @@ export interface NativeMessage
   body: string;
   replyToID?: string;
   mentionsAccount?: boolean;
+  mentionsOther?: boolean;
   artifactLinks?: string[];
 }
 
